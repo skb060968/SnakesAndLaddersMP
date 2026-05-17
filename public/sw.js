@@ -1,0 +1,104 @@
+/* ==============================
+   Snakes & Ladders MP PWA Service Worker
+   - Network-first for HTML/JS/CSS (Vite-hashed, must always be fresh)
+   - Cache-first for static assets (images, sounds, icons)
+   ============================== */
+
+const CACHE_NAME = "snl-mp-v1";
+
+const STATIC_ASSETS = [
+  "/",
+  "/index.html",
+  "/manifest.json",
+  "/images/board.png",
+  "/images/board1.png",
+  "/images/board2.png",
+  "/images/die-1.png",
+  "/images/die-2.png",
+  "/images/die-3.png",
+  "/images/die-4.png",
+  "/images/die-5.png",
+  "/images/die-6.png",
+  "/images/red.png",
+  "/images/green.png",
+  "/images/wood.png",
+  "/images/frame-wood.png",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/sounds/dice-roll.mp3",
+  "/sounds/move.mp3",
+  "/sounds/snake.mp3",
+  "/sounds/ladder.mp3",
+  "/sounds/win.mp3",
+];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)),
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys.map((key) => {
+            if (key !== CACHE_NAME) return caches.delete(key);
+          }),
+        ),
+      )
+      .then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
+
+  // Network-first for HTML/JS/CSS
+  if (
+    event.request.mode === "navigate" ||
+    url.pathname.endsWith(".js") ||
+    url.pathname.endsWith(".css") ||
+    url.pathname.startsWith("/assets/")
+  ) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() =>
+          caches
+            .match(event.request)
+            .then((cached) => cached || caches.match("/index.html")),
+        ),
+    );
+    return;
+  }
+
+  // Cache-first for static assets
+  event.respondWith(
+    caches
+      .match(event.request)
+      .then(
+        (cached) =>
+          cached ||
+          fetch(event.request).then((response) => {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+            return response;
+          }),
+      )
+      .catch(() => caches.match("/index.html")),
+  );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});

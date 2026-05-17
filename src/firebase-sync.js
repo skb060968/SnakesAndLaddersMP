@@ -1,0 +1,227 @@
+/**
+ * Firebase Sync — multi-room operations for Snakes & Ladders MP.
+ *
+ * Rooms stored under `snl-rooms/{roomCode}` to keep the namespace
+ * separate from other games sharing the same Firebase project.
+ *
+ * Mirrors the proven pattern used by Card Games and Tambola.
+ */
+
+import { db, auth } from './firebase-config.js';
+import {
+  ref, set, get, update, remove, onValue, off, onDisconnect,
+} from 'firebase/database';
+
+/** Room code charset — letters only, excludes ambiguous I and O. */
+const ROOM_CODE_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+const ROOM_PATH = 'snl-rooms';
+
+/* ======= RETRY HELPER ======= */
+
+export async function firebaseRetry(fn, maxRetries = 2, delayMs = 500) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      console.warn(`Firebase retry ${attempt + 1}/${maxRetries}:`, err.message);
+      await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
+    }
+  }
+}
+
+/* ======= ROOM CODE ======= */
+
+export function generateRoomCode() {
+  let code = '';
+  for (let i = 0; i < 4; i++) {
+    code += ROOM_CODE_CHARSET[Math.floor(Math.random() * ROOM_CODE_CHARSET.length)];
+  }
+  return code;
+}
+
+/* ======= CREATE / JOIN ======= */
+
+/**
+ * Creates a new room and adds the host as player_0.
+ * @param {string} hostName
+ * @param {string} hostEmoji
+ * @returns {Promise<{ roomCode: string, playerIndex: number }>}
+ */
+export async function createRoom(hostName, hostEmoji) {
+  const uid = auth.currentUser?.uid || 'anonymous';
+  const roomCode = generateRoomCode();
+  const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
+
+  const roomData = {
+    meta: {
+      hostUid: uid,
+      hostName,
+      status: 'lobby',
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+    },
+    players: {
+      player_0: {
+        name: hostName,
+        emoji: hostEmoji,
+        uid,
+        connected: true,
+      },
+    },
+    game: null,
+    ready: {},
+  };
+
+  await firebaseRetry(() => set(roomRef, roomData));
+  return { roomCode, playerIndex: 0 };
+}
+
+/**
+ * Joins an existing room. Rejects if not in lobby state or full (4 players).
+ * @returns {Promise<{ success: boolean, playerIndex?: number, reason?: string }>}
+ */
+export async function joinRoom(roomCode, playerName, playerEmoji) {
+  const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
+  const snapshot = await firebaseRetry(() => get(roomRef));
+  if (!snapshot.exists()) return { success: false, reason: 'Room not found' };
+
+  const data = snapshot.val();
+  if (data.meta?.status !== 'lobby') {
+    return { success: false, reason: 'Game already in progress' };
+  }
+
+  const players = data.players || {};
+  const existingIndices = Object.keys(players)
+    .map((k) => parseInt(k.replace('player_', ''), 10))
+    .filter((n) => !isNaN(n));
+  if (existingIndices.length >= 4) return { success: false, reason: 'Room is full' };
+
+  const nextIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0;
+  const uid = auth.currentUser?.uid || 'anonymous';
+
+  await firebaseRetry(() =>
+    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
+      [`players/player_${nextIndex}`]: {
+        name: playerName,
+        emoji: playerEmoji,
+        uid,
+        connected: true,
+      },
+      'meta/lastActivity': Date.now(),
+    })
+  );
+
+  return { success: true, playerIndex: nextIndex };
+}
+
+/* ======= LISTEN ======= */
+
+/**
+ * Subscribes to a room's live state.
+ * @param {string} roomCode
+ * @param {object} callbacks { onPlayersChange, onGameUpdate, onStatusChange, onRoomDeleted }
+ * @returns {Function} unsubscribe
+ */
+export function listenRoom(roomCode, callbacks) {
+  const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
+
+  const handler = (snapshot) => {
+    if (!snapshot.exists()) {
+      if (callbacks.onRoomDeleted) callbacks.onRoomDeleted();
+      return;
+    }
+    const data = snapshot.val();
+    if (callbacks.onPlayersChange && data.players) callbacks.onPlayersChange(data.players);
+    if (callbacks.onGameUpdate && data.game) callbacks.onGameUpdate(data.game, data.lastMove || null);
+    if (callbacks.onStatusChange && data.meta) callbacks.onStatusChange(data.meta.status);
+  };
+
+  onValue(roomRef, handler);
+  return () => off(roomRef, 'value', handler);
+}
+
+/* ======= STATE WRITES ======= */
+
+/**
+ * Writes full game state (used on game start and after each turn).
+ */
+export async function writeGameState(roomCode, gameStateSerialized, lastMove) {
+  const updates = {
+    game: gameStateSerialized,
+    lastMove: lastMove || null,
+    'meta/lastActivity': Date.now(),
+  };
+  if (gameStateSerialized.status === 'playing') {
+    updates['meta/status'] = 'active';
+  }
+  await firebaseRetry(() => update(ref(db, `${ROOM_PATH}/${roomCode}`), updates));
+}
+
+/**
+ * Two-phase sync helpers (kept for parity with the original SnL approach):
+ * Phase 1 sends the dice value and accumulated steps so opponents can begin
+ * animating in parallel; phase 2 sends the post-snake/ladder positions.
+ */
+export async function syncDicePhase(roomCode, payload) {
+  await firebaseRetry(() =>
+    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
+      'lastMove/phase': 'dice',
+      'lastMove/payload': payload,
+      'lastMove/timestamp': Date.now(),
+      'meta/lastActivity': Date.now(),
+    })
+  );
+}
+
+export async function syncMovePhase(roomCode, gameStateSerialized, lastMove) {
+  const merged = { ...lastMove, phase: 'move', timestamp: Date.now() };
+  await firebaseRetry(() =>
+    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
+      game: gameStateSerialized,
+      lastMove: merged,
+      'meta/lastActivity': Date.now(),
+    })
+  );
+}
+
+/* ======= ROOM LIFECYCLE ======= */
+
+/** Sets up onDisconnect to mark a player as disconnected on connection drop. */
+export function setupDisconnectHandler(roomCode, playerIndex) {
+  const connectedRef = ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}/connected`);
+  onDisconnect(connectedRef).set(false).catch((err) => {
+    console.warn('onDisconnect setup failed:', err.message);
+  });
+}
+
+export async function endRoom(roomCode) {
+  await firebaseRetry(() =>
+    update(ref(db, `${ROOM_PATH}/${roomCode}/meta`), {
+      status: 'ended',
+      lastActivity: Date.now(),
+    })
+  );
+}
+
+export async function deleteRoom(roomCode) {
+  await firebaseRetry(() => remove(ref(db, `${ROOM_PATH}/${roomCode}`)));
+}
+
+/** Resets room to lobby state for a new round. Keeps players, clears game/ready. */
+export async function resetRoom(roomCode) {
+  await firebaseRetry(() =>
+    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
+      'meta/status': 'lobby',
+      'meta/lastActivity': Date.now(),
+      game: null,
+      lastMove: null,
+      ready: {},
+    })
+  );
+}
+
+/* ======= UTILITIES ======= */
+
+export const ROOM_PATH_PREFIX = ROOM_PATH;

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Snakes &amp; Ladders Multiplayer</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="Multiplayer Snakes & Ladders — play with friends online via room codes."
+    />
+    <meta name="theme-color" content="#667eea" />
+
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="app">
+
+      <!-- ========== ONLINE CHOICE ========== -->
+      <section id="online-choice" class="screen" aria-label="Online options">
+        <header class="title">🐍 Snakes &amp; Ladders 🪜</header>
+        <p class="subtitle">Multiplayer Online</p>
+        <button id="btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
+        <button id="btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      </section>
+
+      <!-- ========== CREATE ROOM ========== -->
+      <section id="create-room" class="screen" hidden aria-label="Create a room">
+        <h2 class="setup-heading">Create Room</h2>
+        <div class="setup-group">
+          <input id="create-name-input" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input" />
+        </div>
+        <div class="setup-group">
+          <label class="setup-label">Choose Avatar</label>
+          <div class="emoji-picker create-emoji-picker" role="group">
+            <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button>
+            <button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button>
+            <button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button>
+            <button class="emoji-btn" type="button" data-emoji="🥷">🥷</button>
+            <button class="emoji-btn" type="button" data-emoji="🧙">🧙</button>
+            <button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+          </div>
+        </div>
+        <button id="btn-create-submit" class="btn primary" type="button">Create</button>
+        <button id="btn-back-create" class="btn secondary back-btn" type="button">← Back</button>
+      </section>
+
+      <!-- ========== JOIN ROOM ========== -->
+      <section id="join-room" class="screen" hidden aria-label="Join a room">
+        <h2 class="setup-heading">Join Room</h2>
+        <div class="setup-group">
+          <input id="room-code-input" type="text" maxlength="4" placeholder="Room Code" autocomplete="off" class="text-input" style="text-transform: uppercase;" />
+        </div>
+        <div class="setup-group">
+          <input id="join-name-input" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input" />
+        </div>
+        <div class="setup-group">
+          <label class="setup-label">Choose Avatar</label>
+          <div class="emoji-picker join-emoji-picker" role="group">
+            <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button>
+            <button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button>
+            <button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button>
+            <button class="emoji-btn" type="button" data-emoji="🥷">🥷</button>
+            <button class="emoji-btn" type="button" data-emoji="🧙">🧙</button>
+            <button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+          </div>
+        </div>
+        <button id="btn-join-submit" class="btn primary" type="button">Join</button>
+        <button id="btn-back-join" class="btn secondary back-btn" type="button">← Back</button>
+      </section>
+
+      <!-- ========== LOBBY ========== -->
+      <section id="lobby" class="screen" hidden aria-label="Game lobby">
+        <header class="lobby-header">
+          <h2 class="lobby-title">Game Lobby</h2>
+          <p class="room-code-display">Room: <span id="lobby-room-code">----</span></p>
+        </header>
+        <ul id="lobby-player-list" class="player-list" aria-label="Players in lobby"></ul>
+        <div class="lobby-actions">
+          <button id="btn-share-code" class="btn secondary" type="button">📋 Share Code</button>
+          <button id="btn-start-online" class="btn primary" type="button" hidden>Start Game</button>
+          <button id="btn-leave-lobby" class="btn secondary back-btn" type="button">← Leave</button>
+          <p id="lobby-waiting" class="lobby-waiting">Waiting for host to start…</p>
+        </div>
+      </section>
+
+      <!-- ========== GAMEPLAY ========== -->
+      <section id="gameplay" class="screen" hidden aria-label="Snakes and Ladders board">
+        <main class="board-column" aria-label="Snakes and Ladders board">
+          <div id="board-wrapper" class="board-wrapper">
+            <img id="board-img" class="board-img" src="/images/board.png" alt="Snakes and Ladders board" />
+            <div id="grid" class="grid" aria-hidden="true"></div>
+            <!-- Tokens are dynamically added per player count -->
+          </div>
+        </main>
+
+        <aside class="control-column" aria-label="Game controls and status">
+          <div id="turn" class="turn">Player 1's Turn</div>
+
+          <section class="dice-panel" aria-label="3D dice">
+            <div class="dice-stage">
+              <div id="dice-cube" class="dice-cube" role="img" aria-label="Dice">
+                <div class="die-face face1"></div>
+                <div class="die-face face2"></div>
+                <div class="die-face face3"></div>
+                <div class="die-face face4"></div>
+                <div class="die-face face5"></div>
+                <div class="die-face face6"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="controls-row">
+            <button id="roll-btn" class="btn primary" type="button" aria-label="Roll the dice">Roll Dice</button>
+          </section>
+
+          <section class="status-row" aria-label="Positions and messages">
+            <div id="positions" class="positions"></div>
+            <p id="message" class="message" role="status" aria-live="polite">Ready</p>
+          </section>
+
+          <section class="bottom-row">
+            <button id="board-toggle-btn" class="btn secondary" type="button">Change Board</button>
+            <button id="btn-end-game" class="btn-end-game" type="button" hidden title="End Game">✕</button>
+          </section>
+        </aside>
+      </section>
+
+      <!-- ========== RESULTS ========== -->
+      <section id="results" class="screen" hidden aria-label="Game results">
+        <header class="results-header">
+          <h2 class="results-title">🏆 Game Over!</h2>
+        </header>
+        <div id="winner-display" class="winner-display" aria-label="Winner"></div>
+        <ul id="results-list" class="results-bounty-list" aria-label="Final standings"></ul>
+        <div id="ready-indicators" class="ready-indicators" hidden></div>
+        <div class="results-actions">
+          <button id="btn-play-again" class="btn primary" type="button">Play Again</button>
+          <button id="btn-home" class="btn secondary" type="button">Home</button>
+        </div>
+      </section>
+
+    </div><!-- /.app -->
+
+    <!-- Update toast -->
+    <div id="update-toast" class="update-toast" hidden>
+      <span>A new version is available.</span>
+      <button id="update-refresh-btn" type="button">Update</button>
+    </div>
+
+    <!-- Confetti library (async load, fallback CDN) -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"
+      async
+      onerror="
+        var s=document.createElement('script');
+        s.src='https://unpkg.com/canvas-confetti@1.9.3/dist/confetti.browser.min.js';
+        s.async=true;
+        document.head.appendChild(s);
+      "
+    ></script>
+
+    <!-- App entrypoint -->
+    <script type="module" src="/src/main.js"></script>
+
+    <div class="orientation-overlay">
+      Rotate phone to portrait to play the game.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "name": "snakes-and-ladders-mp",
+  "version": "1.0.0",
+  "description": "Multiplayer Snakes & Ladders — multi-room online play",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "firebase": "^12.9.0"
+  },
+  "devDependencies": {
+    "vite": "^7.3.1"
+  },
+  "keywords": [
+    "snakes-and-ladders",
+    "board-game",
+    "multiplayer",
+    "firebase",
+    "pwa"
+  ],
+  "author": "",
+  "license": "MIT"
+}
