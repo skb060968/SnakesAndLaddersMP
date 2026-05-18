@@ -170,7 +170,8 @@ export function updateTokenSize() {
     const cell = gridEl.querySelector('.cell');
     if (!cell) return;
     const rect = cell.getBoundingClientRect();
-    const fraction = 0.55;
+    // Slightly smaller fraction so 4 tokens (2x2 grid) fit cleanly inside one cell.
+    const fraction = 0.48;
     const raw = rect.width * fraction;
     const size = Math.max(10, Math.min(48, Math.round(raw)));
     document.documentElement.style.setProperty('--token-size', `${size}px`);
@@ -213,16 +214,33 @@ export function createTokens(playerCount) {
 }
 
 /**
- * Places all tokens at their current positions. Multiple tokens on the same
- * square are slightly offset horizontally so they don't fully overlap.
+ * Places all tokens at their current positions. Multiple tokens stacked on
+ * the same square are arranged compactly so they all stay visible inside
+ * the cell:
+ *   - 2 tokens: side-by-side (left, right)
+ *   - 3 tokens: triangle (2 on top, 1 below center)
+ *   - 4 tokens: 2×2 grid
+ * Offsets scale with the cell size so they fit any board zoom.
+ *
+ * Tokens with position === 0 are "in pen" — they are hidden on the board and
+ * rendered inside their pen badge in the control panel instead.
+ *
  * @param {number[]} positions — array of position numbers per player
  */
 export function placeTokens(positions) {
   const wrapper = document.getElementById('board-wrapper');
   if (!wrapper) return;
-  // Group players by cell to compute offsets
+
+  // Read current cell size (token size CSS var) to derive proportional offsets
+  const tokenSize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--token-size')) || 22;
+  // Half-step offset: ~38% of token size keeps them touching but distinct
+  const d = tokenSize * 0.38;
+
+  // Group BOARD players (position > 0) by cell; pen players (position 0)
+  // skip board placement and get hidden.
   const cellGroups = new Map(); // cell -> [playerIdx,...]
   positions.forEach((pos, i) => {
+    if (pos < 1) return;
     if (!cellGroups.has(pos)) cellGroups.set(pos, []);
     cellGroups.get(pos).push(i);
   });
@@ -230,13 +248,80 @@ export function placeTokens(positions) {
   positions.forEach((pos, i) => {
     const tok = document.getElementById(`token${i}`);
     if (!tok) return;
+
+    if (pos < 1) {
+      // In pen — hide the on-board token
+      tok.style.display = 'none';
+      tok.dataset.position = '0';
+      return;
+    }
+    tok.style.display = '';
+
     const center = getCellCenter(pos);
-    const group = cellGroups.get(pos);
+    const group = cellGroups.get(pos) || [i];
     const idxInGroup = group.indexOf(i);
-    const offset = group.length > 1 ? (idxInGroup - (group.length - 1) / 2) * 7 : 0;
-    tok.style.left = `${center.x + offset}px`;
-    tok.style.top = `${center.y}px`;
+    const groupSize = group.length;
+
+    let dx = 0, dy = 0;
+    if (groupSize === 2) {
+      dx = idxInGroup === 0 ? -d : d;
+      dy = 0;
+    } else if (groupSize === 3) {
+      const offsets = [{ x: -d, y: -d * 0.6 }, { x: d, y: -d * 0.6 }, { x: 0, y: d * 0.7 }];
+      dx = offsets[idxInGroup].x;
+      dy = offsets[idxInGroup].y;
+    } else if (groupSize >= 4) {
+      const offsets = [
+        { x: -d, y: -d },
+        { x:  d, y: -d },
+        { x: -d, y:  d },
+        { x:  d, y:  d },
+      ];
+      dx = offsets[idxInGroup].x;
+      dy = offsets[idxInGroup].y;
+    }
+    tok.style.left = `${center.x + dx}px`;
+    tok.style.top = `${center.y + dy}px`;
     tok.dataset.position = String(pos);
+  });
+}
+
+/**
+ * Renders the pens row showing each player's badge + their off-board token.
+ * Once a player's token enters the board (position > 0), their pen shows
+ * the dim placeholder + on-board square number instead.
+ */
+export function renderPens(state, localIdx) {
+  const el = document.getElementById('pens');
+  if (!el) return;
+  el.innerHTML = '';
+  state.players.forEach((p, i) => {
+    const pen = document.createElement('div');
+    pen.className = 'pen';
+    pen.dataset.playerIndex = String(i);
+    if (i === state.currentPlayerIndex && state.status === 'playing') {
+      pen.classList.add('pen-active');
+    }
+    if (p.position > 0) pen.classList.add('on-board');
+
+    const tokenEl = document.createElement('div');
+    tokenEl.className = `pen-token t${i + 1}`;
+    pen.appendChild(tokenEl);
+
+    const name = document.createElement('div');
+    name.className = 'pen-name';
+    const meTag = i === localIdx ? ' (you)' : '';
+    name.textContent = `${p.emoji} ${p.name}${meTag}`;
+    pen.appendChild(name);
+
+    if (p.position > 0) {
+      const pos = document.createElement('div');
+      pos.className = 'pen-position';
+      pos.textContent = p.position === TOTAL ? '🎯 100' : `Sq ${p.position}`;
+      pen.appendChild(pos);
+    }
+
+    el.appendChild(pen);
   });
 }
 
@@ -284,25 +369,75 @@ export function resetDice() {
  * Updates DOM only — caller is responsible for syncing engine state.
  * @returns {Promise<void>}
  */
+/**
+ * Animates a token stepping forward N squares one at a time.
+ * If the token was in the pen (position 0), it first appears at square 1
+ * with an entry jump animation, then continues hopping forward to the
+ * total of N steps (i.e. final square = N).
+ * Updates DOM only — caller is responsible for syncing engine state.
+ * @returns {Promise<void>}
+ */
 export function animateSteps(playerIdx, steps, currentPositions) {
   return new Promise((resolve) => {
     if (steps <= 0) { resolve(); return; }
     const tok = document.getElementById(`token${playerIdx}`);
     if (!tok) { resolve(); return; }
-    let count = 0;
-    const tick = setInterval(() => {
-      count++;
-      currentPositions[playerIdx] = Math.min(TOTAL, currentPositions[playerIdx] + 1);
-      tok.classList.remove('slide');
-      void tok.offsetWidth; // reflow to restart animation
-      tok.classList.add('slide');
-      playSound('move');
+
+    const startPos = currentPositions[playerIdx];
+
+    const startStepping = () => {
+      let count = 0;
+      const tick = setInterval(() => {
+        count++;
+        currentPositions[playerIdx] = Math.min(TOTAL, currentPositions[playerIdx] + 1);
+        tok.classList.remove('slide');
+        void tok.offsetWidth;
+        tok.classList.add('slide');
+        playSound('move');
+        placeTokens(currentPositions);
+        if (count >= steps) {
+          clearInterval(tick);
+          resolve();
+        }
+      }, 300);
+    };
+
+    // First-entry path: token is in the pen (position 0).
+    // Land on square 1 with a single entry-jump, then walk the remaining (steps - 1).
+    if (startPos === 0) {
+      currentPositions[playerIdx] = 1;
       placeTokens(currentPositions);
-      if (count >= steps) {
-        clearInterval(tick);
-        resolve();
-      }
-    }, 300);
+      // Show the token (placeTokens un-hides via display:'') and force a reflow
+      // so the entry animation reliably plays the very first time.
+      void tok.offsetWidth;
+      tok.classList.remove('slide');
+      tok.classList.add('jump');
+      playSound('move');
+      // After the jump animation completes, continue stepping
+      setTimeout(() => {
+        tok.classList.remove('jump');
+        if (steps <= 1) { resolve(); return; }
+        // Walk the remaining steps to reach the rolled square
+        let count = 1; // already at square 1
+        const tick = setInterval(() => {
+          count++;
+          currentPositions[playerIdx] = Math.min(TOTAL, currentPositions[playerIdx] + 1);
+          tok.classList.remove('slide');
+          void tok.offsetWidth;
+          tok.classList.add('slide');
+          playSound('move');
+          placeTokens(currentPositions);
+          if (count >= steps) {
+            clearInterval(tick);
+            resolve();
+          }
+        }, 300);
+      }, 600);
+      return;
+    }
+
+    // Already on board — normal stepping
+    startStepping();
   });
 }
 
