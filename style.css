@@ -305,30 +305,34 @@ body {
 
 /* ======= 8) GAMEPLAY — BOARD ======= */
 
-/* The gameplay screen overrides the default .screen flow to recreate
- * the old SnL "two-half" precise layout: board at the top, control panel
- * below, both fitting in viewport without scrolling. */
+/* Gameplay layout: two stacked squares (board on top, control panel below).
+ * Each square's side equals min(viewport width, ~viewport-height/2).
+ * On portrait mobile/tablet → width-driven. On landscape desktop/TV → flex row. */
 #gameplay {
   justify-content: center;
+  align-items: center;
   height: 100svh;
-  padding: 6px 0;
-  gap: 8px;
+  padding: 0;
+  gap: 0;
 }
 
 .board-column {
   display: flex;
   justify-content: center;
   align-items: center;
-  width: auto;
+  width: 100%;
   flex-shrink: 0;
 }
 
+/* Board square — width = device width up to ceiling, then height matches via aspect-ratio */
 .board-wrapper {
   position: relative;
-  width: min(92vw, 420px);
+  /* Square sized to fit BOTH dimensions: shorter of (full width, ~half viewport height) */
+  width: min(100vw, 50svh);
   aspect-ratio: 1 / 1;
-  border-radius: 16px;
+  border-radius: 0;
   overflow: visible;
+  flex-shrink: 0;
 }
 
 /* Wooden frame */
@@ -399,13 +403,15 @@ body {
 /* ======= 10) CONTROL PANEL (bottom of gameplay screen) ======= */
 
 .control-column {
-  width: min(92vw, 420px);
-  border-radius: 16px;
-  padding: 10px 12px;
+  width: min(100vw, 50svh);
+  aspect-ratio: 1 / 1;
+  border-radius: 0;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  justify-content: space-around;
+  gap: 6px;
   background: rgba(20, 10, 0, 0.55);
   backdrop-filter: blur(6px);
   color: #fff;
@@ -419,6 +425,19 @@ body {
   text-align: center;
   color: #fff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* Gameplay control panel title is more compact than landing/lobby title */
+#gameplay .panel-header { text-align: center; width: 100%; }
+#gameplay .title {
+  font-size: 1.1rem;
+  margin-top: 0;
+  font-family: Georgia, serif;
+}
+#gameplay .turn {
+  margin-top: 4px;
+  font-size: 0.95rem;
+  font-weight: 800;
 }
 
 /* Dice */
@@ -500,13 +519,37 @@ body {
   width: 100%;
   display: flex;
   flex-direction: row;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   justify-content: center;
 }
+
+/* Make the Change Board button take main space; mute and end-game stay compact. */
 .bottom-row .btn {
   max-width: none;
   flex: 1 1 0;
+}
+
+.bottom-row .mute-toggle,
+.bottom-row .btn-end-game {
+  flex: 0 0 auto;
+}
+
+.mute-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: #fff;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mute-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #ffd700;
+  cursor: pointer;
 }
 
 /* Status (positions + message) */
@@ -721,11 +764,13 @@ body {
   100% { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 }
 
-/* ======= 13) ORIENTATION OVERLAY ======= */
+/* ======= 13) ORIENTATION OVERLAY (touch devices only) ======= */
 
 .orientation-overlay { display: none; }
 
-@media (max-width: 900px) and (orientation: landscape) {
+/* Show orientation overlay ONLY on touch devices (coarse pointer) in landscape.
+ * Desktop windows resized small don't trigger it. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 600px) {
   .app { display: none; }
   .orientation-overlay {
     display: flex;
@@ -739,6 +784,29 @@ body {
     padding: 16px;
     font-size: 1.2rem;
     z-index: 9999;
+  }
+}
+
+/* ======= LANDSCAPE LAYOUT (desktop / TV / wide screens) ======= */
+
+@media (min-width: 901px) and (orientation: landscape) {
+  /* Side-by-side board + control panel filling viewport height. */
+  .app:has(#gameplay:not([hidden])) {
+    /* keep gap 0; flex direction handled below */
+  }
+  #gameplay {
+    flex-direction: row;
+    justify-content: center;
+    gap: 16px;
+    padding: 8px;
+  }
+  .board-wrapper {
+    width: min(50vw, 90svh);
+    height: min(50vw, 90svh);
+  }
+  .control-column {
+    width: min(40vw, 90svh);
+    height: min(40vw, 90svh);
   }
 }
 

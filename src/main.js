@@ -14,8 +14,6 @@ import {
   deleteRoom,
   resetRoom,
   writeGameState,
-  syncDicePhase,
-  syncMovePhase,
   firebaseRetry,
 } from './firebase-sync.js';
 import {
@@ -45,6 +43,8 @@ import {
   setTurn,
   renderPositions,
   setRollButtonState,
+  isMuted,
+  toggleMute,
 } from './ui.js';
 import { db } from './firebase-config.js';
 import { ref, get, update, remove, onValue, off } from 'firebase/database';
@@ -432,25 +432,33 @@ async function handleRoll() {
   const { outcome, state: newState } = result;
   const moveTimestamp = Date.now();
 
-  // Phase 1: send dice + outcome immediately so opponents can animate in parallel.
-  // We send the snapshot of newState along with a lastMove descriptor.
-  try {
-    await syncDicePhase(roomCode, {
-      roller: outcome.by,
-      roll: outcome.roll,
-      kind: outcome.kind,
-      steps: outcome.steps || 0,
-      landing: outcome.landing || null,
-      snakeLadderTo: outcome.snakeLadderTo || null,
-      win: !!outcome.win,
-      timestamp: moveTimestamp,
-    });
-  } catch (err) {
-    console.error('syncDicePhase failed:', err);
-  }
+  // Build a single lastMove descriptor that contains everything opponents
+  // need to replay this turn's animations.
+  const lastMove = {
+    roller: outcome.by,
+    roll: outcome.roll,
+    kind: outcome.kind,
+    steps: outcome.steps || 0,
+    landing: outcome.landing != null ? outcome.landing : null,
+    snakeLadderTo: outcome.snakeLadderTo != null ? outcome.snakeLadderTo : null,
+    win: !!outcome.win,
+    timestamp: moveTimestamp,
+  };
 
-  // Mark this timestamp processed so the listener echo doesn't re-animate locally
+  // Mark this timestamp processed BEFORE writing — so the listener echo
+  // for our own move is recognized and doesn't replay the animation locally.
   _lastProcessedMoveTimestamp = moveTimestamp;
+
+  // Single write: authoritative new state + lastMove descriptor.
+  try {
+    await writeGameState(roomCode, serializeState(newState), lastMove);
+  } catch (err) {
+    console.error('writeGameState failed:', err);
+    showToast('Sync failed. Try again.');
+    _isAnimating = false;
+    renderUI();
+    return;
+  }
 
   // Local animation
   playSound('roll');
@@ -462,19 +470,6 @@ async function handleRoll() {
 
   // Update local state to the new state
   state = newState;
-
-  // Phase 2: write the authoritative new state + final lastMove
-  try {
-    await syncMovePhase(roomCode, serializeState(state), {
-      roller: outcome.by,
-      roll: outcome.roll,
-      kind: outcome.kind,
-      win: !!outcome.win,
-      timestamp: moveTimestamp,
-    });
-  } catch (err) {
-    console.error('syncMovePhase failed:', err);
-  }
 
   if (state.status === 'finished') {
     handleWin();
@@ -550,6 +545,13 @@ async function handleRemoteUpdate(gameData, lastMove) {
   if (_resultsShown) return;
   if (_isAnimating) return;
 
+  // Don't process gameplay updates until our gameplay screen is initialized
+  // (startGame() must have run to create tokens and grid).
+  const gameplayEl = document.getElementById('gameplay');
+  if (!gameplayEl || gameplayEl.hasAttribute('hidden')) {
+    return;
+  }
+
   // Skip echoes of our own moves — we already animated locally
   if (lastMove && lastMove.timestamp === _lastProcessedMoveTimestamp) {
     // Local state already current, just refresh authoritative state from Firebase
@@ -571,36 +573,47 @@ async function handleRemoteUpdate(gameData, lastMove) {
     _isAnimating = true;
     _lastProcessedMoveTimestamp = lastMove.timestamp || 0;
 
-    // Local positions snapshot for animation
-    const positions = state ? state.players.map((p) => p.position) : newState.players.map((p) => p.position);
+    try {
+      // Local positions snapshot for animation
+      const positions = state ? state.players.map((p) => p.position) : newState.players.map((p) => p.position);
 
-    // Dice phase
-    setMessage(`${state?.players[lastMove.roller]?.name || 'Opponent'} rolled ${lastMove.roll}`);
-    playSound('roll');
-    throwDiceVisual(lastMove.roll);
-    await new Promise((r) => setTimeout(r, 1150));
+      // Dice phase
+      setMessage(`${state?.players[lastMove.roller]?.name || 'Opponent'} rolled ${lastMove.roll}`);
+      playSound('roll');
+      throwDiceVisual(lastMove.roll);
+      await new Promise((r) => setTimeout(r, 1150));
 
-    // Animate based on kind
-    await runOutcomeAnimation({
-      kind: lastMove.kind,
-      by: lastMove.roller,
-      roll: lastMove.roll,
-      steps: lastMove.steps,
-      landing: lastMove.landing,
-      snakeLadderTo: lastMove.snakeLadderTo,
-      win: lastMove.win,
-    });
+      // Animate based on kind
+      await runOutcomeAnimation({
+        kind: lastMove.kind,
+        by: lastMove.roller,
+        roll: lastMove.roll,
+        steps: lastMove.steps,
+        landing: lastMove.landing,
+        snakeLadderTo: lastMove.snakeLadderTo,
+        win: lastMove.win,
+      });
 
-    state = newState;
+      state = newState;
 
-    if (state.status === 'finished') {
-      handleWin();
+      if (state.status === 'finished') {
+        handleWin();
+        return;
+      }
+      renderUI();
+    } catch (err) {
+      console.error('Remote animation error:', err);
+      // Recover: jump straight to the new state without animation
+      state = newState;
+      if (state.status === 'finished') {
+        handleWin();
+        return;
+      }
+      placeTokens(state.players.map((p) => p.position));
+      renderUI();
+    } finally {
       _isAnimating = false;
-      return;
     }
-
-    _isAnimating = false;
-    renderUI();
     return;
   }
 
@@ -919,6 +932,13 @@ function showUpdateToast(reg) {
   }
 }
 
+function wireMuteToggle() {
+  const toggle = document.getElementById('mute-toggle');
+  if (!toggle) return;
+  toggle.checked = isMuted();
+  toggle.addEventListener('change', () => toggleMute());
+}
+
 /* ======= INIT ======= */
 
 async function init() {
@@ -928,6 +948,7 @@ async function init() {
   wireLobby();
   wireEndGame();
   wireResults();
+  wireMuteToggle();
   wireEmojiPicker('.create-emoji-picker');
   wireEmojiPicker('.join-emoji-picker');
 

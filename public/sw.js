@@ -4,7 +4,7 @@
    - Cache-first for static assets (images, sounds, icons)
    ============================== */
 
-const CACHE_NAME = "snl-mp-v1";
+const CACHE_NAME = "snl-mp-v3";
 
 const STATIC_ASSETS = [
   "/",

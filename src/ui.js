@@ -41,6 +41,25 @@ const soundFiles = {
 let audioCtx = null;
 const audioBuffers = {};
 let audioUnlocked = false;
+let _muted = false;
+
+const MUTE_KEY = 'snl_mp_muted';
+try {
+  const v = localStorage.getItem(MUTE_KEY);
+  if (v === '1') _muted = true;
+} catch (_) {}
+
+export function isMuted() { return _muted; }
+
+export function setMuted(value) {
+  _muted = !!value;
+  try { localStorage.setItem(MUTE_KEY, _muted ? '1' : '0'); } catch (_) {}
+}
+
+export function toggleMute() {
+  setMuted(!_muted);
+  return _muted;
+}
 
 function unlockAudio() {
   if (audioUnlocked) return;
@@ -65,6 +84,7 @@ function unlockAudio() {
 });
 
 export function playSound(name) {
+  if (_muted) return;
   if (audioCtx && audioBuffers[name]) {
     const src = audioCtx.createBufferSource();
     src.buffer = audioBuffers[name];

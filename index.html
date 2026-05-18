@@ -102,7 +102,10 @@
         </main>
 
         <aside class="control-column" aria-label="Game controls and status">
-          <div id="turn" class="turn">Player 1's Turn</div>
+          <header class="panel-header">
+            <h1 class="title">Snakes &amp; Ladders</h1>
+            <div id="turn" class="turn">Player 1's Turn</div>
+          </header>
 
           <section class="dice-panel" aria-label="3D dice">
             <div class="dice-stage">
@@ -128,6 +131,9 @@
 
           <section class="bottom-row">
             <button id="board-toggle-btn" class="btn secondary" type="button">Change Board</button>
+            <label class="mute-toggle" for="mute-toggle">
+              <input id="mute-toggle" type="checkbox" aria-label="Toggle sound mute" /> 🔇
+            </label>
             <button id="btn-end-game" class="btn-end-game" type="button" hidden title="End Game">✕</button>
           </section>
         </aside>
