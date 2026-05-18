@@ -595,6 +595,7 @@ async function handleRemoteUpdate(gameData, lastMove) {
       });
 
       state = newState;
+      _isAnimating = false;
 
       if (state.status === 'finished') {
         handleWin();
@@ -605,6 +606,7 @@ async function handleRemoteUpdate(gameData, lastMove) {
       console.error('Remote animation error:', err);
       // Recover: jump straight to the new state without animation
       state = newState;
+      _isAnimating = false;
       if (state.status === 'finished') {
         handleWin();
         return;

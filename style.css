@@ -312,8 +312,10 @@ body {
   justify-content: center;
   align-items: center;
   height: 100svh;
-  padding: 0;
-  gap: 0;
+  /* Breathing room above board (clears mobile browser bar) and below
+   * control panel; small horizontal margin keeps content off screen edges. */
+  padding: max(env(safe-area-inset-top), 12px) 8px max(env(safe-area-inset-bottom), 8px);
+  gap: 12px;
 }
 
 .board-column {
@@ -327,8 +329,9 @@ body {
 /* Board square — width = device width up to ceiling, then height matches via aspect-ratio */
 .board-wrapper {
   position: relative;
-  /* Square sized to fit BOTH dimensions: shorter of (full width, ~half viewport height) */
-  width: min(100vw, 50svh);
+  /* Square sized to fit BOTH dimensions: shorter of (full width minus padding,
+   * ~half viewport height minus paddings/gap). */
+  width: min(calc(100vw - 16px), calc(50svh - 26px));
   aspect-ratio: 1 / 1;
   border-radius: 0;
   overflow: visible;
@@ -403,9 +406,9 @@ body {
 /* ======= 10) CONTROL PANEL (bottom of gameplay screen) ======= */
 
 .control-column {
-  width: min(100vw, 50svh);
+  width: min(calc(100vw - 16px), calc(50svh - 26px));
   aspect-ratio: 1 / 1;
-  border-radius: 0;
+  border-radius: 16px;
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
@@ -413,7 +416,9 @@ body {
   justify-content: space-around;
   gap: 6px;
   background: rgba(20, 10, 0, 0.55);
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   color: #fff;
   flex-shrink: 0;
 }
