@@ -127,10 +127,15 @@ export function setBoardSkin(index) {
 export function getBoardIndex() { return currentBoardIndex; }
 
 function readCurrentPositions() {
-  // Read positions back from DOM tokens — used after board skin change
+  // Read positions back from DOM tokens — used after board skin change.
+  // Note: 0 is a valid position (virtual square 0, off-board pen), so we
+  // can't use `|| 1` here — that would silently drag pen tokens to sq 1.
   const tokens = document.querySelectorAll('.token');
   if (!tokens.length) return null;
-  return Array.from(tokens).map((t) => parseInt(t.dataset.position, 10) || 1);
+  return Array.from(tokens).map((t) => {
+    const v = parseInt(t.dataset.position, 10);
+    return Number.isFinite(v) ? v : 0;
+  });
 }
 
 /* ======= GRID ======= */
