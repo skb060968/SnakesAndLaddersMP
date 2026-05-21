@@ -112,7 +112,7 @@ function getSelectedEmoji(selector) {
 
 /* ======= COLOR PICKER ======= */
 
-const ALL_COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+const ALL_COLORS = ['red', 'pink', 'yellow', 'green', 'blue', 'purple'];
 
 function wireColorPicker(selector) {
   const picker = document.querySelector(selector);
@@ -353,7 +353,7 @@ function renderLobbyPlayers(playersArr) {
   if (!list) return;
   list.innerHTML = '';
   const colorDots = {
-    red: '🔴', orange: '🟠', yellow: '🟡',
+    red: '🔴', pink: '🩷', yellow: '🟡',
     green: '🟢', blue: '🔵', purple: '🟣',
   };
   playersArr.forEach((player, index) => {
