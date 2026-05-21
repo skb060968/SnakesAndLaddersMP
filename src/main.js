@@ -458,8 +458,18 @@ function startGame() {
   buildGrid();
   setBoardSkin(state.boardIndex || 0);
   createTokens(state.players.map((p) => p.color || 'red'));
-  // Place tokens at initial positions (1)
-  placeTokens(state.players.map((p) => p.position));
+  // Place tokens at initial positions — defer to next two frames so the
+  // gameplay screen's layout (just unhidden via showScreen) has fully
+  // settled. Without this, getBoundingClientRect for cell 1 can return
+  // stale/zero values on first render and tokens end up misaligned at
+  // virtual square 0. After Play Again the layout is already stable so
+  // it worked, but a fresh game from a fresh load needs the deferral.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      updateTokenSize();
+      placeTokens(state.players.map((p) => p.position));
+    });
+  });
 
   // Wire roll button (idempotent — re-wires safely)
   const rollBtn = document.getElementById('roll-btn');
