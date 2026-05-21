@@ -57,6 +57,7 @@ export function createGame(playerInfos) {
   const players = playerInfos.map((info) => ({
     name: info.name,
     emoji: info.emoji,
+    color: info.color || 'red',
     position: 0,           // 0 = in pen (off-board); 1..100 = on board
     accumulatedSteps: 0,   // sixes "banked" awaiting a non-six
     consecutiveSixes: 0,   // counts toward 3-six penalty
@@ -312,6 +313,7 @@ export function deserializeState(gameData, playersData) {
     return {
       name: pData.name || `Player ${i + 1}`,
       emoji: pData.emoji || '😀',
+      color: pData.color || 'red',
       position: gameData.positions && gameData.positions[key] != null ? gameData.positions[key] : 0,
       accumulatedSteps: (gameData.accumulated && gameData.accumulated[key]) || 0,
       consecutiveSixes: (gameData.consecutive && gameData.consecutive[key]) || 0,

@@ -47,9 +47,10 @@ export function generateRoomCode() {
  * Creates a new room and adds the host as player_0.
  * @param {string} hostName
  * @param {string} hostEmoji
+ * @param {string} hostColor — token color id ('red'|'orange'|'yellow'|'green'|'blue'|'purple')
  * @returns {Promise<{ roomCode: string, playerIndex: number }>}
  */
-export async function createRoom(hostName, hostEmoji) {
+export async function createRoom(hostName, hostEmoji, hostColor) {
   const uid = auth.currentUser?.uid || 'anonymous';
   const roomCode = generateRoomCode();
   const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
@@ -66,6 +67,7 @@ export async function createRoom(hostName, hostEmoji) {
       player_0: {
         name: hostName,
         emoji: hostEmoji,
+        color: hostColor || 'red',
         uid,
         connected: true,
       },
@@ -79,10 +81,11 @@ export async function createRoom(hostName, hostEmoji) {
 }
 
 /**
- * Joins an existing room. Rejects if not in lobby state or full (4 players).
+ * Joins an existing room. Rejects if not in lobby state, full (4 players), or
+ * if the requested color is already taken by another player.
  * @returns {Promise<{ success: boolean, playerIndex?: number, reason?: string }>}
  */
-export async function joinRoom(roomCode, playerName, playerEmoji) {
+export async function joinRoom(roomCode, playerName, playerEmoji, playerColor) {
   const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
   const snapshot = await firebaseRetry(() => get(roomRef));
   if (!snapshot.exists()) return { success: false, reason: 'Room not found' };
@@ -98,6 +101,14 @@ export async function joinRoom(roomCode, playerName, playerEmoji) {
     .filter((n) => !isNaN(n));
   if (existingIndices.length >= 4) return { success: false, reason: 'Room is full' };
 
+  // Color collision check — must be a free color
+  const takenColors = new Set(
+    Object.values(players).map((p) => p.color).filter(Boolean)
+  );
+  if (playerColor && takenColors.has(playerColor)) {
+    return { success: false, reason: 'That color is already taken' };
+  }
+
   const nextIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0;
   const uid = auth.currentUser?.uid || 'anonymous';
 
@@ -106,6 +117,7 @@ export async function joinRoom(roomCode, playerName, playerEmoji) {
       [`players/player_${nextIndex}`]: {
         name: playerName,
         emoji: playerEmoji,
+        color: playerColor || 'red',
         uid,
         connected: true,
       },

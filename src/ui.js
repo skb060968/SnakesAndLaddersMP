@@ -202,16 +202,19 @@ function getCellCenter(cellNumber) {
 /**
  * Creates N tokens (idx 0..N-1) inside #board-wrapper.
  * Idempotent — removes any existing tokens first.
+ * @param {string[]} colors — array of color ids per player ('red'|'orange'|...)
  */
-export function createTokens(playerCount) {
+export function createTokens(colors) {
   const wrapper = document.getElementById('board-wrapper');
   if (!wrapper) return;
   // Remove any existing tokens
   wrapper.querySelectorAll('.token').forEach((t) => t.remove());
+  const playerCount = colors.length;
   for (let i = 0; i < playerCount; i++) {
     const t = document.createElement('div');
     t.id = `token${i}`;
-    t.className = `token token${i + 1}`; // token1..token4 — color via CSS
+    t.className = 'token';
+    t.dataset.color = colors[i] || 'red';
     t.dataset.position = '0';
     t.setAttribute('aria-label', `Player ${i + 1} token`);
     wrapper.appendChild(t);
@@ -428,14 +431,17 @@ export function renderPositions(state, localIdx) {
   if (!el) return;
   el.innerHTML = '';
   el.className = `positions players-${state.players.length}`;
+  // Map color ids to dot emojis (visual cue in the player list)
+  const colorDots = {
+    red: '🔴', orange: '🟠', yellow: '🟡',
+    green: '🟢', blue: '🔵', purple: '🟣',
+  };
   state.players.forEach((p, i) => {
     const row = document.createElement('div');
     row.className = 'player-row';
     const isMe = i === localIdx;
     const isCurrent = i === state.currentPlayerIndex;
-    // Color dot prefix matches token color
-    const colorDots = ['🔴', '🟢', '🔵', '🟡'];
-    const dot = colorDots[i] || '⚪';
+    const dot = colorDots[p.color] || '⚪';
     const meTag = isMe ? ' (you)' : '';
     row.textContent = `${dot} ${p.emoji} ${p.name}${meTag}: ${p.position}`;
     if (isCurrent) {
@@ -448,12 +454,10 @@ export function renderPositions(state, localIdx) {
 
 /* ======= ROLL BUTTON HELPERS ======= */
 
-export function setRollButtonState(enabled, playerIndex) {
+export function setRollButtonState(enabled, color) {
   const btn = document.getElementById('roll-btn');
   if (!btn) return;
   btn.disabled = !enabled;
-  btn.classList.remove('p1-turn', 'p2-turn', 'p3-turn', 'p4-turn');
-  if (playerIndex != null) {
-    btn.classList.add(`p${playerIndex + 1}-turn`);
-  }
+  btn.classList.remove('color-red', 'color-orange', 'color-yellow', 'color-green', 'color-blue', 'color-purple');
+  if (color) btn.classList.add(`color-${color}`);
 }

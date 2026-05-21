@@ -110,13 +110,66 @@ function getSelectedEmoji(selector) {
   return sel?.dataset.emoji || '👲';
 }
 
+/* ======= COLOR PICKER ======= */
+
+const ALL_COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+
+function wireColorPicker(selector) {
+  const picker = document.querySelector(selector);
+  if (!picker) return;
+  const btns = picker.querySelectorAll('.color-btn');
+  btns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.classList.contains('taken')) return;
+      btns.forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+    });
+  });
+}
+
+function getSelectedColor(selector) {
+  const sel = document.querySelector(`${selector} .color-btn.selected`);
+  return sel?.dataset.color || 'red';
+}
+
+/**
+ * Marks a list of colors as taken (dimmed) on a picker, and ensures the
+ * selected color is a free one (auto-picks the first free color if the
+ * current selection is taken).
+ */
+function applyTakenColors(selector, takenColors) {
+  const picker = document.querySelector(selector);
+  if (!picker) return;
+  const btns = Array.from(picker.querySelectorAll('.color-btn'));
+  const takenSet = new Set(takenColors || []);
+  btns.forEach((btn) => {
+    const c = btn.dataset.color;
+    if (takenSet.has(c)) {
+      btn.classList.add('taken');
+      btn.classList.remove('selected');
+    } else {
+      btn.classList.remove('taken');
+    }
+  });
+  // If nothing is selected (all picks were taken), pick first free
+  const stillSelected = picker.querySelector('.color-btn.selected:not(.taken)');
+  if (!stillSelected) {
+    const firstFree = btns.find((b) => !b.classList.contains('taken'));
+    if (firstFree) firstFree.classList.add('selected');
+  }
+}
+
 /* ======= ONLINE CHOICE SCREEN ======= */
 
 function wireOnlineChoice() {
   const btnCreate = document.getElementById('btn-create-room');
   const btnJoin = document.getElementById('btn-join-room');
   if (btnCreate) btnCreate.addEventListener('click', () => showScreen('create-room'));
-  if (btnJoin) btnJoin.addEventListener('click', () => showScreen('join-room'));
+  if (btnJoin) btnJoin.addEventListener('click', () => {
+    showScreen('join-room');
+    // Reset taken-colors picker since user may be retrying with a new code
+    applyTakenColors('.join-color-picker', []);
+  });
 }
 
 /* ======= CREATE ROOM ======= */
@@ -129,8 +182,9 @@ function wireCreateRoom() {
     const name = document.getElementById('create-name-input')?.value.trim();
     if (!name) { showToast('Please enter your name'); return; }
     const emoji = getSelectedEmoji('.create-emoji-picker');
+    const color = getSelectedColor('.create-color-picker');
     try {
-      const result = await createRoom(name, emoji);
+      const result = await createRoom(name, emoji, color);
       roomCode = result.roomCode;
       playerIndex = result.playerIndex;
       isHost = true;
@@ -149,9 +203,50 @@ function wireCreateRoom() {
 
 /* ======= JOIN ROOM ======= */
 
+let _joinPreviewUnsub = null;
+let _lastPreviewedCode = null;
+
+/**
+ * Watches a candidate room (entered code) so the color picker dims any
+ * already-taken colors live while the user is still on the join screen.
+ * Auto-restarts when the typed code changes.
+ */
+function startJoinPreviewListener(code) {
+  if (!code || code.length !== 4) return;
+  if (_lastPreviewedCode === code && _joinPreviewUnsub) return;
+  stopJoinPreviewListener();
+  _lastPreviewedCode = code;
+  const playersRef = ref(db, `snl-rooms/${code}/players`);
+  const handler = (snap) => {
+    const data = snap.val() || {};
+    const taken = Object.values(data).map((p) => p && p.color).filter(Boolean);
+    applyTakenColors('.join-color-picker', taken);
+  };
+  onValue(playersRef, handler);
+  _joinPreviewUnsub = () => { off(playersRef, 'value', handler); };
+}
+
+function stopJoinPreviewListener() {
+  if (_joinPreviewUnsub) { _joinPreviewUnsub(); _joinPreviewUnsub = null; }
+  _lastPreviewedCode = null;
+  applyTakenColors('.join-color-picker', []);
+}
+
 function wireJoinRoom() {
   const btnSubmit = document.getElementById('btn-join-submit');
   const btnBack = document.getElementById('btn-back-join');
+  const codeInput = document.getElementById('room-code-input');
+
+  // Live preview: as the user types a 4-char code, start listening to that
+  // room's players so the color picker dims taken colors in real time.
+  if (codeInput) codeInput.addEventListener('input', () => {
+    const code = codeInput.value.trim().toUpperCase();
+    if (code.length === 4) {
+      startJoinPreviewListener(code);
+    } else {
+      stopJoinPreviewListener();
+    }
+  });
 
   if (btnSubmit) btnSubmit.addEventListener('click', async () => {
     const code = document.getElementById('room-code-input')?.value.trim().toUpperCase();
@@ -159,14 +254,16 @@ function wireJoinRoom() {
     if (!code || code.length !== 4) { showToast('Enter a valid 4-character room code'); return; }
     if (!name) { showToast('Please enter your name'); return; }
     const emoji = getSelectedEmoji('.join-emoji-picker');
+    const color = getSelectedColor('.join-color-picker');
     try {
-      const result = await joinRoom(code, name, emoji);
+      const result = await joinRoom(code, name, emoji, color);
       if (!result.success) { showToast(result.reason || 'Failed to join'); return; }
       roomCode = code;
       playerIndex = result.playerIndex;
       isHost = false;
       saveSession();
       setupDisconnectHandler(roomCode, playerIndex);
+      stopJoinPreviewListener();
       setupLobby();
     } catch (err) {
       console.error(err);
@@ -174,7 +271,10 @@ function wireJoinRoom() {
     }
   });
 
-  if (btnBack) btnBack.addEventListener('click', () => showScreen('online-choice'));
+  if (btnBack) btnBack.addEventListener('click', () => {
+    stopJoinPreviewListener();
+    showScreen('online-choice');
+  });
 }
 
 /* ======= LOBBY ======= */
@@ -252,13 +352,20 @@ function renderLobbyPlayers(playersArr) {
   const list = document.getElementById('lobby-player-list');
   if (!list) return;
   list.innerHTML = '';
+  const colorDots = {
+    red: '🔴', orange: '🟠', yellow: '🟡',
+    green: '🟢', blue: '🔵', purple: '🟣',
+  };
   playersArr.forEach((player, index) => {
     const li = document.createElement('li');
+    const dot = document.createElement('span');
+    dot.textContent = colorDots[player.color] || '⚪';
     const emojiSpan = document.createElement('span');
     emojiSpan.textContent = player.emoji || '😀';
     const nameSpan = document.createElement('span');
     nameSpan.textContent = player.name || `Player ${index + 1}`;
     nameSpan.style.flex = '1';
+    li.appendChild(dot);
     li.appendChild(emojiSpan);
     li.appendChild(nameSpan);
     if (index === 0) {
@@ -300,6 +407,7 @@ function wireLobby() {
       const infos = keys.map((k) => ({
         name: pd[k].name || 'Unknown',
         emoji: pd[k].emoji || '😀',
+        color: pd[k].color || 'red',
       }));
       state = createGame(infos);
       const validation = validateState(state);
@@ -349,7 +457,7 @@ function startGame() {
   // Build the board
   buildGrid();
   setBoardSkin(state.boardIndex || 0);
-  createTokens(state.players.length);
+  createTokens(state.players.map((p) => p.color || 'red'));
   // Place tokens at initial positions (1)
   placeTokens(state.players.map((p) => p.position));
 
@@ -395,7 +503,8 @@ function renderUI() {
   highlightActiveToken(state.currentPlayerIndex);
 
   const isMyTurn = state.currentPlayerIndex === playerIndex;
-  setRollButtonState(isMyTurn && !_isAnimating, state.currentPlayerIndex);
+  const curColor = cur?.color || 'red';
+  setRollButtonState(isMyTurn && !_isAnimating, curColor);
 
   if (isMyTurn) {
     setMessage('Your turn — roll the dice');
@@ -412,7 +521,7 @@ async function handleRoll() {
   if (_isAnimating) return;
 
   _isAnimating = true;
-  setRollButtonState(false, state.currentPlayerIndex);
+  setRollButtonState(false, state.players[state.currentPlayerIndex]?.color || 'red');
   setMessage('Rolling...');
 
   const roll = Math.floor(Math.random() * 6) + 1;
@@ -640,6 +749,7 @@ function buildPlayersData() {
     playersData[`player_${i}`] = {
       name,
       emoji: state ? state.players[i]?.emoji || '😀' : '😀',
+      color: state ? state.players[i]?.color || 'red' : 'red',
     };
   });
   return playersData;
@@ -953,6 +1063,8 @@ async function init() {
   wireMuteToggle();
   wireEmojiPicker('.create-emoji-picker');
   wireEmojiPicker('.join-emoji-picker');
+  wireColorPicker('.create-color-picker');
+  wireColorPicker('.join-color-picker');
 
   // Try restoring an existing session before showing the choice screen
   const restored = await checkSession();
