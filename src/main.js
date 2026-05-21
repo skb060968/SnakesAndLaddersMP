@@ -41,7 +41,7 @@ import {
   playSound,
   setMessage,
   setTurn,
-  renderPens,
+  renderPositions,
   setRollButtonState,
   isMuted,
   toggleMute,
@@ -389,7 +389,7 @@ function renderUI() {
 
   const cur = state.players[state.currentPlayerIndex];
   setTurn(`${cur?.emoji || ''} ${cur?.name || 'Player'}'s turn`);
-  renderPens(state, playerIndex);
+  renderPositions(state, playerIndex);
 
   // Highlight current player's token
   highlightActiveToken(state.currentPlayerIndex);

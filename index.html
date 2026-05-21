@@ -107,9 +107,6 @@
             <div id="turn" class="turn">Player 1's Turn</div>
           </header>
 
-          <!-- Pens — 1-row of up to 4 badges holding off-board tokens -->
-          <div id="pens" class="pens" aria-label="Player pens"></div>
-
           <section class="dice-panel" aria-label="3D dice">
             <div class="dice-stage">
               <div id="dice-cube" class="dice-cube" role="img" aria-label="Dice">
@@ -127,7 +124,8 @@
             <button id="roll-btn" class="btn primary" type="button" aria-label="Roll the dice">Roll Dice</button>
           </section>
 
-          <section class="status-row" aria-label="Game messages">
+          <section class="status-row" aria-label="Positions and messages">
+            <div id="positions" class="positions"></div>
             <p id="message" class="message" role="status" aria-live="polite">Ready</p>
           </section>
 
