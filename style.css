@@ -380,7 +380,7 @@ body {
   border-radius: 50%;
   transform: translate(-50%, -50%);
   z-index: 5;
-  background-image: url("/images/red.png");
+  background-image: var(--token-src, url("/images/red.png"));
   background-size: cover;
   background-position: center;
   filter:
@@ -395,15 +395,15 @@ body {
     inset 0 0 4px rgba(255, 255, 255, 0.2);
 }
 
-/* Per-color hue-rotate (single red.png source, tinted via CSS).
- * Yellow/orange need extra brightness+saturation to escape red.png's
- * darker shading and read as pure hues. */
-.token[data-color="red"]    { --token-hue:   0deg; --token-sat: 1.1; --token-bri: 1.00; }
-.token[data-color="orange"] { --token-hue:  60deg; --token-sat: 1.1; --token-bri: 1.00; }
-.token[data-color="yellow"] { --token-hue: 100deg; --token-sat: 1.1; --token-bri: 1.00; }
-.token[data-color="green"]  { --token-hue: 160deg; --token-sat: 1.1; --token-bri: 1.00; }
-.token[data-color="blue"]   { --token-hue: 220deg; --token-sat: 1.1; --token-bri: 1.00; }
-.token[data-color="purple"] { --token-hue: 280deg; --token-sat: 1.1; --token-bri: 1.00; }
+/* Two source bitmaps (red.png, green.png) used as bases for 6 colors.
+ * Each color uses the closer source so the hue shift stays small and
+ * the rendered color reads cleanly. */
+.token[data-color="red"]    { --token-src: url("/images/red.png");   --token-hue:   0deg; }
+.token[data-color="orange"] { --token-src: url("/images/red.png");   --token-hue:  30deg; }
+.token[data-color="purple"] { --token-src: url("/images/red.png");   --token-hue: 280deg; }
+.token[data-color="yellow"] { --token-src: url("/images/green.png"); --token-hue: -60deg; }
+.token[data-color="green"]  { --token-src: url("/images/green.png"); --token-hue:   0deg; }
+.token[data-color="blue"]   { --token-src: url("/images/green.png"); --token-hue: 120deg; }
 
 /* ======= 9b) COLOR PICKER (create / join screens) ======= */
 
@@ -420,7 +420,7 @@ body {
   height: 36px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.3);
-  background-image: url("/images/red.png");
+  background-image: var(--token-src, url("/images/red.png"));
   background-size: cover;
   background-position: center;
   filter:
@@ -432,12 +432,12 @@ body {
   position: relative;
 }
 
-.color-btn[data-color="red"]    { --token-hue:   0deg; --token-sat: 1.1; --token-bri: 1.00; }
-.color-btn[data-color="orange"] { --token-hue:  60deg; --token-sat: 1.1; --token-bri: 1.00; }
-.color-btn[data-color="yellow"] { --token-hue: 100deg; --token-sat: 1.1; --token-bri: 1.00; }
-.color-btn[data-color="green"]  { --token-hue: 160deg; --token-sat: 1.1; --token-bri: 1.00; }
-.color-btn[data-color="blue"]   { --token-hue: 220deg; --token-sat: 1.1; --token-bri: 1.00; }
-.color-btn[data-color="purple"] { --token-hue: 280deg; --token-sat: 1.1; --token-bri: 1.00; }
+.color-btn[data-color="red"]    { --token-src: url("/images/red.png");   --token-hue:   0deg; }
+.color-btn[data-color="orange"] { --token-src: url("/images/red.png");   --token-hue:  30deg; }
+.color-btn[data-color="purple"] { --token-src: url("/images/red.png");   --token-hue: 280deg; }
+.color-btn[data-color="yellow"] { --token-src: url("/images/green.png"); --token-hue: -60deg; }
+.color-btn[data-color="green"]  { --token-src: url("/images/green.png"); --token-hue:   0deg; }
+.color-btn[data-color="blue"]   { --token-src: url("/images/green.png"); --token-hue: 120deg; }
 
 .color-btn:hover { transform: scale(1.08); }
 
