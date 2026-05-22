@@ -317,7 +317,10 @@ body {
   /* Breathing room above board (clears mobile browser bar) and below
    * control panel; small horizontal margin keeps content off screen edges. */
   padding: max(env(safe-area-inset-top), 12px) 8px max(env(safe-area-inset-bottom), 8px);
-  gap: 12px;
+  /* Gap scales with viewport so it always exceeds the wooden frame's
+   * overflow (4% of board) — keeps the frame from intruding into the
+   * control panel area at any zoom level. */
+  gap: clamp(16px, 5svh, 32px);
 }
 
 .board-column {
@@ -332,8 +335,9 @@ body {
 .board-wrapper {
   position: relative;
   /* Square sized to fit BOTH dimensions: shorter of (full width minus padding,
-   * ~half viewport height minus paddings/gap). */
-  width: min(calc(100vw - 16px), calc(50svh - 26px));
+   * ~half viewport height minus paddings/gap). The height term subtracts a
+   * larger amount (≈42px) to leave room for the bigger zoom-safe gap above. */
+  width: min(calc(100vw - 16px), calc(50svh - 42px));
   aspect-ratio: 1 / 1;
   border-radius: 0;
   overflow: visible;
@@ -344,7 +348,9 @@ body {
 .board-wrapper::before {
   content: "";
   position: absolute;
-  inset: -8%;
+  /* Frame overflow kept small so it never reaches into the gap with
+   * the control panel below (or beside, in landscape). */
+  inset: -4%;
   background-image: url("/images/frame-wood.png");
   background-repeat: no-repeat;
   background-size: contain;
@@ -454,7 +460,7 @@ body {
 /* ======= 10) CONTROL PANEL (bottom of gameplay screen) ======= */
 
 .control-column {
-  width: min(calc(100vw - 16px), calc(50svh - 26px));
+  width: min(calc(100vw - 16px), calc(50svh - 42px));
   aspect-ratio: 1 / 1;
   border-radius: 16px;
   padding: 14px 16px;
@@ -850,7 +856,9 @@ body {
   #gameplay {
     flex-direction: row;
     justify-content: center;
-    gap: 16px;
+    /* Generous gap so the wooden frame never overlaps the control panel
+     * even when zoomed; scales with viewport. */
+    gap: clamp(24px, 4vw, 56px);
     padding: 8px;
   }
   .board-wrapper {

@@ -1013,6 +1013,36 @@ async function checkSession() {
   }
 }
 
+/* ======= RESPONSIVE LAYOUT — REPOSITION ON ZOOM / RESIZE ======= */
+
+/* Tokens are positioned with absolute pixel coordinates captured via
+ * getBoundingClientRect() at the moment placeTokens() ran. CSS-driven
+ * layout (board size, grid cells) reflows automatically on zoom or
+ * resize, but those captured pixel coordinates do not — so tokens
+ * drift relative to the board until something else triggers a redraw.
+ *
+ * Listening for window.resize and visualViewport.resize covers both
+ * window resizing and browser zoom (Chrome/Edge fire visualViewport
+ * resize on Ctrl+/Ctrl- zoom). Debounced so it doesn't run mid-drag. */
+let _layoutResyncTimer = null;
+function syncTokensToLayout() {
+  if (!state || !state.players) return;
+  // Only meaningful while the gameplay screen is visible
+  const gameplayEl = document.getElementById('gameplay');
+  if (!gameplayEl || gameplayEl.hasAttribute('hidden')) return;
+  updateTokenSize();
+  placeTokens(state.players.map((p) => p.position));
+}
+function scheduleLayoutResync() {
+  if (_layoutResyncTimer) clearTimeout(_layoutResyncTimer);
+  _layoutResyncTimer = setTimeout(syncTokensToLayout, 120);
+}
+window.addEventListener('resize', scheduleLayoutResync);
+window.addEventListener('orientationchange', scheduleLayoutResync);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', scheduleLayoutResync);
+}
+
 /* ======= SERVICE WORKER ======= */
 
 if ('serviceWorker' in navigator) {
