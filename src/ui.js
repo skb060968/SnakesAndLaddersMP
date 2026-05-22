@@ -23,9 +23,9 @@
 import { BOARD_SIZE, TOTAL, SNAKES, LADDERS } from './engine.js';
 
 const BOARD_SKINS = [
+  '/images/board2.png',
   '/images/board.png',
   '/images/board1.png',
-  '/images/board2.png',
 ];
 
 /* ======= AUDIO ======= */
