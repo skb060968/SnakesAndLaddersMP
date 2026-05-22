@@ -7,7 +7,7 @@
  *
  * Game rules (preserved from the original SnakesAndLadders project):
  *  - 10x10 board, 100 squares
- *  - Players start at square 1 and race to square 100
+ *  - Players start off-board (position 0, virtual square 0) and race to square 100
  *  - Roll a 6 → bonus turn (roll again, no movement yet — six is "stored")
  *  - Sixes accumulate; on the next non-six roll, total moves at once
  *  - Three sixes in a row → penalty: turn is forfeited, no movement

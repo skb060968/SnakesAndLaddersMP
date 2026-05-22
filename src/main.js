@@ -1,7 +1,7 @@
 /* Snakes & Ladders MP — entry point.
  *
- * Wires room flows (create / join / lobby / start / leave / end / play again).
- * Gameplay rendering and dice/animation logic will be added in Step 5.
+ * Wires room flows (create / join / lobby / start / leave / end / play again)
+ * and gameplay (board, dice, animations, results).
  */
 
 import { showScreen, showToast } from './platform-ui.js';
@@ -111,8 +111,6 @@ function getSelectedEmoji(selector) {
 }
 
 /* ======= COLOR PICKER ======= */
-
-const ALL_COLORS = ['red', 'brown', 'yellow', 'green', 'blue', 'purple'];
 
 function wireColorPicker(selector) {
   const picker = document.querySelector(selector);
@@ -765,7 +763,7 @@ function buildPlayersData() {
   return playersData;
 }
 
-/* ======= WIN / RESULTS (Step 6 will polish this) ======= */
+/* ======= WIN / RESULTS ======= */
 
 function handleWin() {
   if (_resultsShown) { renderResults(state); showScreen('results'); return; }

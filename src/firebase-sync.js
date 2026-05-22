@@ -171,32 +171,6 @@ export async function writeGameState(roomCode, gameStateSerialized, lastMove) {
   await firebaseRetry(() => update(ref(db, `${ROOM_PATH}/${roomCode}`), updates));
 }
 
-/**
- * Two-phase sync helpers (kept for parity with the original SnL approach):
- * Phase 1 sends the dice value and accumulated steps so opponents can begin
- * animating in parallel; phase 2 sends the post-snake/ladder positions.
- */
-export async function syncDicePhase(roomCode, payload) {
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
-      'lastMove/phase': 'dice',
-      'lastMove/payload': payload,
-      'lastMove/timestamp': Date.now(),
-      'meta/lastActivity': Date.now(),
-    })
-  );
-}
-
-export async function syncMovePhase(roomCode, gameStateSerialized, lastMove) {
-  const merged = { ...lastMove, phase: 'move', timestamp: Date.now() };
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
-      game: gameStateSerialized,
-      lastMove: merged,
-      'meta/lastActivity': Date.now(),
-    })
-  );
-}
 
 /* ======= ROOM LIFECYCLE ======= */
 
@@ -233,7 +207,3 @@ export async function resetRoom(roomCode) {
     })
   );
 }
-
-/* ======= UTILITIES ======= */
-
-export const ROOM_PATH_PREFIX = ROOM_PATH;

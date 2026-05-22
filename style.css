@@ -447,10 +447,28 @@ body {
 .color-btn.selected:hover { transform: none; }
 
 .color-btn.taken {
-  opacity: 0.3;
+  /* Dim, but keep enough color and detail visible that the original
+   * token color is still recognizable (so you can see "green is taken"). */
+  opacity: 0.55;
   cursor: not-allowed;
   pointer-events: none;
-  filter: saturate(0.5) grayscale(0.6);
+  filter: saturate(0.85) brightness(0.85);
+}
+
+/* Diagonal strike across taken swatches — visual "X" so taken state
+ * is unambiguous even when colors are similar at a glance. */
+.color-btn.taken::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    linear-gradient(135deg,
+      transparent 46%,
+      rgba(0, 0, 0, 0.55) 46%,
+      rgba(0, 0, 0, 0.55) 54%,
+      transparent 54%);
+  pointer-events: none;
 }
 
 /* ======= 10) CONTROL PANEL (bottom of gameplay screen) ======= */
@@ -621,6 +639,7 @@ body {
   align-items: center;
   width: 100%;
   max-width: 320px;
+  margin: 0 auto;
 }
 
 .positions.players-2 {
