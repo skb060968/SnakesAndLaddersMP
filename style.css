@@ -145,7 +145,7 @@ body {
 
 /* Roll button accent matches current player's chosen token color (set by JS). */
 .btn.primary.color-red    { background: linear-gradient(180deg, #c92a2a, #7f1d1d); }
-.btn.primary.color-pink   { background: linear-gradient(180deg, #ff6b9a, #c2185b); }
+.btn.primary.color-brown  { background: linear-gradient(180deg, #a0522d, #5c3317); }
 .btn.primary.color-yellow { background: linear-gradient(180deg, #f1c40f, #c69b00); color: #2a1a00; }
 .btn.primary.color-green  { background: linear-gradient(180deg, #2f9e44, #18632a); }
 .btn.primary.color-blue   { background: linear-gradient(180deg, #2b6ef6, #1e4fbf); }
@@ -383,10 +383,6 @@ body {
   background-image: var(--token-src, url("/images/red.png"));
   background-size: cover;
   background-position: center;
-  filter:
-    hue-rotate(var(--token-hue, 0deg))
-    saturate(var(--token-sat, 1.1))
-    brightness(var(--token-bri, 1));
   transition:
     left 260ms cubic-bezier(0.2, 0.9, 0.2, 1),
     top 260ms cubic-bezier(0.2, 0.9, 0.2, 1);
@@ -395,15 +391,13 @@ body {
     inset 0 0 4px rgba(255, 255, 255, 0.2);
 }
 
-/* Two source bitmaps (red.png, green.png) used as bases for 6 colors.
- * Each color uses the closer source so the hue shift stays small and
- * the rendered color reads cleanly. */
-.token[data-color="red"]    { --token-src: url("/images/red.png");   --token-hue:   0deg; }
-.token[data-color="pink"]   { --token-src: url("/images/red.png");   --token-hue: 320deg; }
-.token[data-color="purple"] { --token-src: url("/images/red.png");   --token-hue: 280deg; }
-.token[data-color="yellow"] { --token-src: url("/images/green.png"); --token-hue: -60deg; }
-.token[data-color="green"]  { --token-src: url("/images/green.png"); --token-hue:   0deg; }
-.token[data-color="blue"]   { --token-src: url("/images/green.png"); --token-hue: 120deg; }
+/* Each color points to its dedicated bitmap — no CSS hue rotation. */
+.token[data-color="red"]    { --token-src: url("/images/red.png"); }
+.token[data-color="brown"]  { --token-src: url("/images/brown.png"); }
+.token[data-color="yellow"] { --token-src: url("/images/yellow.png"); }
+.token[data-color="green"]  { --token-src: url("/images/green.png"); }
+.token[data-color="blue"]   { --token-src: url("/images/blue.png"); }
+.token[data-color="purple"] { --token-src: url("/images/purple.png"); }
 
 /* ======= 9b) COLOR PICKER (create / join screens) ======= */
 
@@ -423,21 +417,17 @@ body {
   background-image: var(--token-src, url("/images/red.png"));
   background-size: cover;
   background-position: center;
-  filter:
-    hue-rotate(var(--token-hue, 0deg))
-    saturate(var(--token-sat, 1.1))
-    brightness(var(--token-bri, 1));
   cursor: pointer;
   transition: transform 0.12s, border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
   position: relative;
 }
 
-.color-btn[data-color="red"]    { --token-src: url("/images/red.png");   --token-hue:   0deg; }
-.color-btn[data-color="pink"]   { --token-src: url("/images/red.png");   --token-hue: 320deg; }
-.color-btn[data-color="purple"] { --token-src: url("/images/red.png");   --token-hue: 280deg; }
-.color-btn[data-color="yellow"] { --token-src: url("/images/green.png"); --token-hue: -60deg; }
-.color-btn[data-color="green"]  { --token-src: url("/images/green.png"); --token-hue:   0deg; }
-.color-btn[data-color="blue"]   { --token-src: url("/images/green.png"); --token-hue: 120deg; }
+.color-btn[data-color="red"]    { --token-src: url("/images/red.png"); }
+.color-btn[data-color="brown"]  { --token-src: url("/images/brown.png"); }
+.color-btn[data-color="yellow"] { --token-src: url("/images/yellow.png"); }
+.color-btn[data-color="green"]  { --token-src: url("/images/green.png"); }
+.color-btn[data-color="blue"]   { --token-src: url("/images/blue.png"); }
+.color-btn[data-color="purple"] { --token-src: url("/images/purple.png"); }
 
 .color-btn:hover { transform: scale(1.08); }
 
@@ -451,7 +441,7 @@ body {
   opacity: 0.3;
   cursor: not-allowed;
   pointer-events: none;
-  filter: hue-rotate(var(--token-hue, 0deg)) saturate(0.5) grayscale(0.6);
+  filter: saturate(0.5) grayscale(0.6);
 }
 
 /* ======= 10) CONTROL PANEL (bottom of gameplay screen) ======= */

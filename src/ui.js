@@ -433,7 +433,7 @@ export function renderPositions(state, localIdx) {
   el.className = `positions players-${state.players.length}`;
   // Map color ids to dot emojis (visual cue in the player list)
   const colorDots = {
-    red: '🔴', pink: '🩷', yellow: '🟡',
+    red: '🔴', brown: '🟤', yellow: '🟡',
     green: '🟢', blue: '🔵', purple: '🟣',
   };
   state.players.forEach((p, i) => {
@@ -458,6 +458,6 @@ export function setRollButtonState(enabled, color) {
   const btn = document.getElementById('roll-btn');
   if (!btn) return;
   btn.disabled = !enabled;
-  btn.classList.remove('color-red', 'color-pink', 'color-yellow', 'color-green', 'color-blue', 'color-purple');
+  btn.classList.remove('color-red', 'color-brown', 'color-yellow', 'color-green', 'color-blue', 'color-purple');
   if (color) btn.classList.add(`color-${color}`);
 }
