@@ -413,7 +413,8 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid transparent;
+  background-color: transparent;
   background-image: var(--token-src, url("/images/red.png"));
   background-size: cover;
   background-position: center;
