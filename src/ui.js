@@ -365,7 +365,15 @@ export function animateSteps(playerIdx, steps, currentPositions) {
       placeTokens(currentPositions);
       if (count >= steps) {
         clearInterval(tick);
-        resolve();
+        // Only the final hop onto square 100 needs an extra pause: its CSS
+        // transition (260ms) gets cut off when handleWin swaps to the
+        // results screen immediately. Non-winning moves resolve right away
+        // so the next turn starts without a noticeable delay.
+        if (currentPositions[playerIdx] === TOTAL) {
+          setTimeout(resolve, 320);
+        } else {
+          resolve();
+        }
       }
     }, 300);
   });
