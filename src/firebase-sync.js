@@ -96,17 +96,30 @@ export async function joinRoom(roomCode, playerName, playerEmoji, playerColor) {
   }
 
   const players = data.players || {};
-  const existingIndices = Object.keys(players)
+  // A "ghost" slot is one with no name (only a leftover `connected:false`
+  // written by a stale onDisconnect after the player left). Filter from
+  // the index calculation and clean up so the lobby doesn't show empty cards.
+  const ghostKeys = Object.keys(players).filter((k) => !players[k] || !players[k].name);
+  const validKeys = Object.keys(players).filter((k) => players[k] && players[k].name);
+  const existingIndices = validKeys
     .map((k) => parseInt(k.replace('player_', ''), 10))
     .filter((n) => !isNaN(n));
   if (existingIndices.length >= 4) return { success: false, reason: 'Room is full' };
 
-  // Color collision check — must be a free color
+  // Color collision check — must be a free color (only against valid players).
   const takenColors = new Set(
-    Object.values(players).map((p) => p.color).filter(Boolean)
+    validKeys.map((k) => players[k].color).filter(Boolean)
   );
   if (playerColor && takenColors.has(playerColor)) {
     return { success: false, reason: 'That color is already taken' };
+  }
+
+  if (ghostKeys.length > 0) {
+    try {
+      const cleanup = {};
+      ghostKeys.forEach((k) => { cleanup[`players/${k}`] = null; });
+      await update(ref(db, `${ROOM_PATH}/${roomCode}`), cleanup);
+    } catch (_) {}
   }
 
   const nextIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0;
@@ -180,6 +193,19 @@ export function setupDisconnectHandler(roomCode, playerIndex) {
   onDisconnect(connectedRef).set(false).catch((err) => {
     console.warn('onDisconnect setup failed:', err.message);
   });
+}
+
+/**
+ * Player leaves the lobby. Cancels the queued onDisconnect first so it
+ * doesn't fire and recreate a ghost slot after the page closes, then
+ * removes the player node.
+ */
+export async function leavePlayer(roomCode, playerIndex) {
+  const connectedRef = ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}/connected`);
+  try { await onDisconnect(connectedRef).cancel(); } catch (_) {}
+  await firebaseRetry(() =>
+    remove(ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}`))
+  );
 }
 
 export async function endRoom(roomCode) {

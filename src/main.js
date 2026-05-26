@@ -10,6 +10,7 @@ import {
   joinRoom,
   listenRoom,
   setupDisconnectHandler,
+  leavePlayer,
   endRoom,
   deleteRoom,
   resetRoom,
@@ -47,7 +48,6 @@ import {
   toggleMute,
 } from './ui.js';
 import { db } from './firebase-config.js';
-import { ref, get, update, remove, onValue, off } from 'firebase/database';
 
 /* ======= CONSTANTS ======= */
 
@@ -423,7 +423,7 @@ function wireLobby() {
     if (isHost && roomCode) {
       try { await deleteRoom(roomCode); } catch (_) {}
     } else if (roomCode && playerIndex != null) {
-      try { await remove(ref(db, `snl-rooms/${roomCode}/players/player_${playerIndex}`)); } catch (_) {}
+      try { await leavePlayer(roomCode, playerIndex); } catch (_) {}
     }
     cleanupAndGoHome();
   });
