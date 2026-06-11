@@ -87,7 +87,15 @@ export async function createRoom(hostName, hostEmoji, hostColor) {
  */
 export async function joinRoom(roomCode, playerName, playerEmoji, playerColor) {
   const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
-  const snapshot = await firebaseRetry(async () => await get(roomRef));
+  
+  let snapshot;
+  try {
+    snapshot = await get(roomRef);
+  } catch (err) {
+    console.error('Firebase get error:', err);
+    return { success: false, reason: 'Failed to fetch room' };
+  }
+  
   if (!snapshot.exists()) return { success: false, reason: 'Room not found' };
 
   const data = snapshot.val();
