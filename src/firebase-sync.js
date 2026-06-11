@@ -8,9 +8,14 @@
  */
 
 import { db, auth } from './firebase-config.js';
-import {
-  ref, set, get, update, remove, onValue, off, onDisconnect,
-} from 'firebase/database';
+import { ref } from 'firebase/database';
+import { set } from 'firebase/database';
+import { get } from 'firebase/database';
+import { update } from 'firebase/database';
+import { remove } from 'firebase/database';
+import { onValue } from 'firebase/database';
+import { off } from 'firebase/database';
+import { onDisconnect } from 'firebase/database';
 
 /** Room code charset — letters only, excludes ambiguous I and O. */
 const ROOM_CODE_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
