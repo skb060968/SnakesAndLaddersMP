@@ -48,7 +48,7 @@ import {
   toggleMute,
 } from './ui.js';
 import { db } from './firebase-config.js';
-import { ref, get, onValue, off } from 'firebase/database';
+import { ref, get, update, onValue, off } from 'firebase/database';
 
 /* ======= CONSTANTS ======= */
 
