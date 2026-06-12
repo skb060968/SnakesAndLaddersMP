@@ -16,6 +16,7 @@ import {
   resetRoom,
   writeGameState,
   firebaseRetry,
+  setPlayerReady,
 } from './firebase-sync.js';
 import {
   createGame,
@@ -871,7 +872,7 @@ function wireResults() {
         btnAgain.dataset.hostReady = 'true';
         btnAgain.textContent = '▶ Start New Round';
         if (roomCode) {
-          try { await update(ref(db, `snl-rooms/${roomCode}/ready`), { [`player_${playerIndex}`]: true }); } catch (_) {}
+          try { await setPlayerReady(roomCode, playerIndex, true); } catch (_) {}
         }
       } else {
         if (window._snlReadyCleanup) window._snlReadyCleanup();
@@ -884,7 +885,7 @@ function wireResults() {
       }
     } else {
       if (roomCode && playerIndex != null) {
-        try { await update(ref(db, `snl-rooms/${roomCode}/ready`), { [`player_${playerIndex}`]: true }); } catch (_) {}
+        try { await setPlayerReady(roomCode, playerIndex, true); } catch (_) {}
       }
       btnAgain.dataset.playerReady = 'true';
       btnAgain.disabled = true;
@@ -900,7 +901,7 @@ function wireResults() {
     if (window._snlReadyCleanup) window._snlReadyCleanup();
     if (roomCode) {
       if (playerIndex != null) {
-        try { await update(ref(db, `snl-rooms/${roomCode}/ready`), { [`player_${playerIndex}`]: 'left' }); } catch (_) {}
+        try { await setPlayerReady(roomCode, playerIndex, 'left'); } catch (_) {}
       }
       if (isHost) {
         try { await deleteRoom(roomCode); } catch (_) {}

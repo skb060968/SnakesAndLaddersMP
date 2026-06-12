@@ -246,3 +246,24 @@ export async function resetRoom(roomCode) {
     })
   );
 }
+
+/* ======= READY STATE (PLAY AGAIN) ======= */
+
+/**
+ * Sets a player's ready state on the results screen.
+ * Used for the "Play Again" flow:
+ * - true = player clicked Play Again (green dot)
+ * - 'left' = player clicked Home (red dot)
+ * - undefined/null = waiting (hollow dot)
+ * 
+ * @param {string} roomCode
+ * @param {number} playerIndex
+ * @param {boolean|'left'} status
+ */
+export async function setPlayerReady(roomCode, playerIndex, status) {
+  await firebaseRetry(() =>
+    update(ref(db, `${ROOM_PATH}/${roomCode}/ready`), {
+      [`player_${playerIndex}`]: status,
+    })
+  );
+}
