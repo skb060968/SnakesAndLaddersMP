@@ -300,7 +300,8 @@ function setupLobby() {
 
   unsubscribeRoom = listenRoom(roomCode, {
     onPlayersChange: (players) => {
-      const keys = Object.keys(players).sort();
+      // Filter out ghost players (no name) — leftover from stale onDisconnect
+      const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
       const arr = keys.map((k) => players[k]);
       playerNames = arr.map((p) => p.name || 'Unknown');
       renderLobbyPlayers(arr);
@@ -403,7 +404,8 @@ function wireLobby() {
       const snap = await firebaseRetry(() => get(ref(db, `snl-rooms/${roomCode}/players`)));
       if (!snap.exists()) { showToast('No players found'); return; }
       const pd = snap.val();
-      const keys = Object.keys(pd).sort();
+      // Filter out ghost players before starting game
+      const keys = Object.keys(pd).filter((k) => pd[k] && pd[k].name).sort();
       const infos = keys.map((k) => ({
         name: pd[k].name || 'Unknown',
         emoji: pd[k].emoji || '😀',
@@ -973,7 +975,8 @@ async function checkSession() {
     playerIndex = session.playerIndex;
     isHost = session.isHost;
     if (d.players) {
-      const keys = Object.keys(d.players).sort();
+      // Filter out ghost players on session restore
+      const keys = Object.keys(d.players).filter((k) => d.players[k] && d.players[k].name).sort();
       playerNames = keys.map((k) => d.players[k].name || 'Unknown');
     }
     try { await update(ref(db, `snl-rooms/${roomCode}/players/player_${playerIndex}`), { connected: true }); } catch (_) {}
@@ -985,7 +988,8 @@ async function checkSession() {
       if (unsubscribeRoom) unsubscribeRoom();
       unsubscribeRoom = listenRoom(roomCode, {
         onPlayersChange: (players) => {
-          const keys = Object.keys(players).sort();
+          // Filter out ghost players
+          const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
           playerNames = keys.map((k) => players[k].name || 'Unknown');
         },
         onStatusChange: async (s) => {
