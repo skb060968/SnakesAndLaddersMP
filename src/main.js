@@ -383,13 +383,22 @@ function wireLobby() {
   const btnShare = document.getElementById('btn-share-code');
   if (btnShare) btnShare.addEventListener('click', async () => {
     if (!roomCode) return;
+    // Include room code in URL for direct joining
+    const shareUrl = `${location.origin}${location.pathname}?room=${roomCode}`;
     const text = `Join my Snakes & Ladders room! Code: ${roomCode}`;
     if (navigator.share) {
-      try { await navigator.share({ title: 'Snakes & Ladders MP', text, url: location.origin }); return; } catch (_) {}
+      try { 
+        await navigator.share({ 
+          title: 'Snakes & Ladders MP', 
+          text, 
+          url: shareUrl 
+        }); 
+        return; 
+      } catch (_) {}
     }
     try {
-      await navigator.clipboard.writeText(`${text}\n${location.origin}`);
-      showToast('Room code copied!');
+      await navigator.clipboard.writeText(`${text}\n${shareUrl}`);
+      showToast('Room link copied!');
     } catch (_) {
       showToast(`Room code: ${roomCode}`);
     }
@@ -1095,6 +1104,90 @@ function wireMuteToggle() {
   toggle.addEventListener('change', () => toggleMute());
 }
 
+/* ======= PWA APP BANNER ======= */
+
+let deferredInstallPrompt = null;
+
+// Capture the install prompt event
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+});
+
+function showAppBanner() {
+  // Check if already shown in this session
+  if (sessionStorage.getItem('app-banner-dismissed')) return;
+  
+  // Create banner HTML
+  const banner = document.createElement('div');
+  banner.id = 'app-banner';
+  banner.className = 'app-banner';
+  banner.innerHTML = `
+    <div class="app-banner-content">
+      <span class="app-banner-icon">📱</span>
+      <span class="app-banner-text">Better experience in app</span>
+      <div class="app-banner-actions">
+        <button id="app-banner-open" class="app-banner-btn primary">Open/Install App</button>
+        <button id="app-banner-continue" class="app-banner-btn secondary">Continue Here</button>
+        <button id="app-banner-close" class="app-banner-btn close" aria-label="Close">×</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(banner);
+  
+  // Animate in
+  setTimeout(() => banner.classList.add('show'), 100);
+  
+  // Wire buttons
+  document.getElementById('app-banner-open')?.addEventListener('click', handleOpenApp);
+  document.getElementById('app-banner-continue')?.addEventListener('click', dismissAppBanner);
+  document.getElementById('app-banner-close')?.addEventListener('click', dismissAppBanner);
+}
+
+function dismissAppBanner() {
+  const banner = document.getElementById('app-banner');
+  if (banner) {
+    banner.classList.remove('show');
+    setTimeout(() => banner.remove(), 300);
+  }
+  sessionStorage.setItem('app-banner-dismissed', 'true');
+}
+
+async function handleOpenApp() {
+  try {
+    // If install prompt is available, show it
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      const result = await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      
+      if (result.outcome === 'accepted') {
+        showToast('App installing...');
+        dismissAppBanner();
+      } else {
+        showToast('Continue in browser');
+      }
+      return;
+    }
+    
+    // Try to open PWA using intent (Android) or custom scheme
+    // This will only work if PWA is already installed
+    const currentUrl = window.location.href;
+    window.location.href = currentUrl.replace('https://', 'web+snl://');
+    
+    // Wait to see if app opened
+    setTimeout(() => {
+      // Still here? App didn't open or not installed
+      showToast('App not installed. Install from browser menu (⋮) → "Install app"', 3500);
+    }, 1000);
+    
+  } catch (err) {
+    console.warn('Failed to open app:', err);
+    showToast('Install app from browser menu (⋮) → "Install app"', 3500);
+  }
+}
+
 /* ======= INIT ======= */
 
 async function init() {
@@ -1109,6 +1202,32 @@ async function init() {
   wireEmojiPicker('.join-emoji-picker');
   wireColorPicker('.create-color-picker');
   wireColorPicker('.join-color-picker');
+
+  // Check for room code in URL (e.g., ?room=ABCD)
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlRoomCode = urlParams.get('room');
+  
+  if (urlRoomCode) {
+    // Clean URL after extracting room code
+    window.history.replaceState({}, '', window.location.pathname);
+    
+    // Auto-fill room code and show join screen
+    const roomInput = document.getElementById('room-code-input');
+    if (roomInput) {
+      roomInput.value = urlRoomCode.toUpperCase();
+    }
+    showScreen('join-room');
+    showToast('Room code filled from link!');
+    
+    // Check if opened in browser (not PWA) and show app banner
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches;
+    if (!isPWA) {
+      // Show banner after a short delay so user sees the join screen first
+      setTimeout(() => showAppBanner(), 800);
+    }
+    
+    return;
+  }
 
   // Try restoring an existing session before showing the choice screen
   const restored = await checkSession();
