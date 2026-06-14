@@ -1118,6 +1118,19 @@ function showAppBanner() {
   // Check if already shown in this session
   if (sessionStorage.getItem('app-banner-dismissed')) return;
   
+  // Remove existing banner if any
+  const existing = document.getElementById('app-banner');
+  if (existing) existing.remove();
+  
+  // Detect device type
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const bannerText = isMobile 
+    ? 'Better experience in app' 
+    : 'Have the app installed?';
+  const buttonText = isMobile 
+    ? 'Open/Install App' 
+    : 'Using App';
+  
   // Create banner HTML
   const banner = document.createElement('div');
   banner.id = 'app-banner';
@@ -1125,9 +1138,9 @@ function showAppBanner() {
   banner.innerHTML = `
     <div class="app-banner-content">
       <span class="app-banner-icon">📱</span>
-      <span class="app-banner-text">Better experience in app</span>
+      <span class="app-banner-text">${bannerText}</span>
       <div class="app-banner-actions">
-        <button id="app-banner-open" class="app-banner-btn primary">Open/Install App</button>
+        <button id="app-banner-open" class="app-banner-btn primary">${buttonText}</button>
         <button id="app-banner-continue" class="app-banner-btn secondary">Continue Here</button>
         <button id="app-banner-close" class="app-banner-btn close" aria-label="Close">×</button>
       </div>
@@ -1140,7 +1153,7 @@ function showAppBanner() {
   setTimeout(() => banner.classList.add('show'), 100);
   
   // Wire buttons
-  document.getElementById('app-banner-open')?.addEventListener('click', handleOpenApp);
+  document.getElementById('app-banner-open')?.addEventListener('click', () => handleOpenApp(isMobile));
   document.getElementById('app-banner-continue')?.addEventListener('click', dismissAppBanner);
   document.getElementById('app-banner-close')?.addEventListener('click', dismissAppBanner);
 }
@@ -1154,7 +1167,7 @@ function dismissAppBanner() {
   sessionStorage.setItem('app-banner-dismissed', 'true');
 }
 
-async function handleOpenApp() {
+async function handleOpenApp(isMobile) {
   try {
     // If install prompt is available, show it
     if (deferredInstallPrompt) {
@@ -1171,7 +1184,14 @@ async function handleOpenApp() {
       return;
     }
     
-    // Try to open PWA using intent (Android) or custom scheme
+    // Desktop: Different message since we can't auto-open
+    if (!isMobile) {
+      dismissAppBanner();
+      showToast('💡 Tip: Open the app separately from your desktop/start menu', 4000);
+      return;
+    }
+    
+    // Mobile: Try to open PWA using custom scheme
     // This will only work if PWA is already installed
     const currentUrl = window.location.href;
     window.location.href = currentUrl.replace('https://', 'web+snl://');
@@ -1179,12 +1199,12 @@ async function handleOpenApp() {
     // Wait to see if app opened
     setTimeout(() => {
       // Still here? App didn't open or not installed
-      showToast('App not installed. Install from browser menu (⋮) → "Install app"', 3500);
+      showToast('Install app: Browser menu (⋮) → "Install app"', 3500);
     }, 1000);
     
   } catch (err) {
     console.warn('Failed to open app:', err);
-    showToast('Install app from browser menu (⋮) → "Install app"', 3500);
+    showToast('Install app: Browser menu (⋮) → "Install app"', 3500);
   }
 }
 
