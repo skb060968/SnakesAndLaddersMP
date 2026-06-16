@@ -6,6 +6,8 @@
    - Animations: hop, jump, pulse, penalty-glow, snake-hit, ladder-hit
    ========================================================= */
 
+@import './src/app-banner.css';
+
 /* ======= 1) RESET ======= */
 *, *::before, *::after {
   box-sizing: border-box;

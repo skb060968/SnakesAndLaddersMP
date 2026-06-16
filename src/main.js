@@ -5,6 +5,7 @@
  */
 
 import { showScreen, showToast } from './platform-ui.js';
+import { initDeepLinkHandler, createShareHandler, showQRCode } from './deep-link-handler.js';
 import {
   createRoom,
   joinRoom,
@@ -381,27 +382,13 @@ function renderLobbyPlayers(playersArr) {
 
 function wireLobby() {
   const btnShare = document.getElementById('btn-share-code');
-  if (btnShare) btnShare.addEventListener('click', async () => {
-    if (!roomCode) return;
-    // Include room code in URL for direct joining
-    const shareUrl = `${location.origin}${location.pathname}?room=${roomCode}`;
-    const text = `Join my Snakes & Ladders room! Code: ${roomCode}`;
-    if (navigator.share) {
-      try { 
-        await navigator.share({ 
-          title: 'Snakes & Ladders MP', 
-          text, 
-          url: shareUrl 
-        }); 
-        return; 
-      } catch (_) {}
-    }
-    try {
-      await navigator.clipboard.writeText(`${text}\n${shareUrl}`);
-      showToast('Room link copied!');
-    } catch (_) {
-      showToast(`Room code: ${roomCode}`);
-    }
+  if (btnShare) btnShare.addEventListener('click', () => {
+    if (roomCode) createShareHandler(roomCode, 'Snakes & Ladders MP')();
+  });
+  
+  const btnQR = document.getElementById('btn-qr-code');
+  if (btnQR) btnQR.addEventListener('click', () => {
+    if (roomCode) showQRCode(roomCode, 'Snakes & Ladders MP');
   });
 
   const btnStart = document.getElementById('btn-start-online');
@@ -1211,6 +1198,13 @@ async function handleOpenApp(isMobile) {
 /* ======= INIT ======= */
 
 async function init() {
+  // Initialize deep link handler
+  initDeepLinkHandler({
+    roomInputId: 'room-code-input',
+    joinScreenId: 'join-room',
+    gameName: 'Snakes & Ladders MP'
+  });
+
   wireOnlineChoice();
   wireCreateRoom();
   wireJoinRoom();
