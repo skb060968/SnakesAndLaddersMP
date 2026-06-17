@@ -388,15 +388,28 @@ function renderLobbyPlayers(playersArr, playerKeys = []) {
       removeBtn.textContent = '✕';
       removeBtn.title = 'Remove player';
       removeBtn.addEventListener('click', async () => {
-        if (!roomCode) return;
+        console.log('Remove button clicked', { roomCode, index, playerKeys });
+        if (!roomCode) {
+          console.error('No roomCode');
+          return;
+        }
         // Extract player index from the key (e.g., "player_2" -> 2)
         const playerKey = playerKeys[index];
-        if (!playerKey) return;
+        console.log('Player key:', playerKey);
+        if (!playerKey) {
+          console.error('No playerKey found at index', index);
+          return;
+        }
         const targetIndex = parseInt(playerKey.replace('player_', ''), 10);
-        if (isNaN(targetIndex)) return;
+        console.log('Target index:', targetIndex);
+        if (isNaN(targetIndex)) {
+          console.error('Invalid target index');
+          return;
+        }
         
         removeBtn.disabled = true;
         try {
+          console.log('Calling removePlayer', roomCode, targetIndex);
           await removePlayer(roomCode, targetIndex);
           showToast(`${player.name} removed from room`);
         } catch (err) {
