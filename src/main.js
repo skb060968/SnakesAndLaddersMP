@@ -1218,8 +1218,19 @@ async function init() {
     showScreenFn: showScreen
   });
   
-  // If deep link handled the room code, we're done
-  if (urlRoomCode) return;
+  // If deep link handled the room code, trigger the preview listener
+  // to dim already-taken colors in real time
+  if (urlRoomCode) {
+    // Give the DOM a moment to settle after screen change
+    setTimeout(() => {
+      const codeInput = document.getElementById('room-code-input');
+      if (codeInput && codeInput.value.length === 4) {
+        // Manually trigger input event to start the preview listener
+        codeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }, 100);
+    return;
+  }
 
   // Try restoring an existing session before showing the choice screen
   const restored = await checkSession();
