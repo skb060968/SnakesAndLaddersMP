@@ -88,6 +88,10 @@ export async function createRoom(hostName, hostEmoji, hostColor) {
 /**
  * Joins an existing room. Rejects if not in lobby state, full (4 players), or
  * if the requested color is already taken by another player.
+ * 
+ * If the same UID already has a slot (e.g., rejoining after leaving), reuses
+ * that slot instead of creating a new one to prevent duplicate entries.
+ * 
  * @returns {Promise<{ success: boolean, playerIndex?: number, reason?: string }>}
  */
 export async function joinRoom(roomCode, playerName, playerEmoji, playerColor) {
@@ -109,6 +113,31 @@ export async function joinRoom(roomCode, playerName, playerEmoji, playerColor) {
   }
 
   const players = data.players || {};
+  const uid = auth.currentUser?.uid || 'anonymous';
+  
+  // Check if this UID already has a slot (rejoining after leaving)
+  const existingSlot = Object.keys(players).find((k) => 
+    players[k] && players[k].uid === uid && uid !== 'anonymous'
+  );
+  
+  if (existingSlot) {
+    // Reuse existing slot - just update the info and mark as connected
+    const slotIndex = parseInt(existingSlot.replace('player_', ''), 10);
+    await firebaseRetry(() =>
+      update(ref(db, `${ROOM_PATH}/${roomCode}`), {
+        [`players/${existingSlot}`]: {
+          name: playerName,
+          emoji: playerEmoji,
+          color: playerColor || players[existingSlot].color || 'red',
+          uid,
+          connected: true,
+        },
+        'meta/lastActivity': Date.now(),
+      })
+    );
+    return { success: true, playerIndex: slotIndex };
+  }
+  
   // A "ghost" slot is one with no name (only a leftover `connected:false`
   // written by a stale onDisconnect after the player left). Filter from
   // the index calculation and clean up so the lobby doesn't show empty cards.
@@ -136,7 +165,6 @@ export async function joinRoom(roomCode, playerName, playerEmoji, playerColor) {
   }
 
   const nextIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0;
-  const uid = auth.currentUser?.uid || 'anonymous';
 
   await firebaseRetry(() =>
     update(ref(db, `${ROOM_PATH}/${roomCode}`), {
