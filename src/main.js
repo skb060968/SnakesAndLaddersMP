@@ -12,6 +12,7 @@ import {
   listenRoom,
   setupDisconnectHandler,
   leavePlayer,
+  removePlayer,
   endRoom,
   deleteRoom,
   resetRoom,
@@ -309,7 +310,8 @@ function setupLobby() {
       const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
       const arr = keys.map((k) => players[k]);
       playerNames = arr.map((p) => p.name || 'Unknown');
-      renderLobbyPlayers(arr);
+      // Pass both the players array and their keys for rendering
+      renderLobbyPlayers(arr, keys);
     },
     onStatusChange: async (status) => {
       // Only initialize game flow on the FIRST transition to active.
@@ -354,7 +356,7 @@ function setupLobby() {
   });
 }
 
-function renderLobbyPlayers(playersArr) {
+function renderLobbyPlayers(playersArr, playerKeys = []) {
   const list = document.getElementById('lobby-player-list');
   if (!list) return;
   list.innerHTML = '';
@@ -379,6 +381,31 @@ function renderLobbyPlayers(playersArr) {
       badge.className = 'host-badge';
       badge.textContent = 'HOST';
       li.appendChild(badge);
+    } else if (isHost) {
+      // Show remove button for non-host players when current user is host
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'remove-player-btn';
+      removeBtn.textContent = '✕';
+      removeBtn.title = 'Remove player';
+      removeBtn.addEventListener('click', async () => {
+        if (!roomCode) return;
+        // Extract player index from the key (e.g., "player_2" -> 2)
+        const playerKey = playerKeys[index];
+        if (!playerKey) return;
+        const targetIndex = parseInt(playerKey.replace('player_', ''), 10);
+        if (isNaN(targetIndex)) return;
+        
+        removeBtn.disabled = true;
+        try {
+          await removePlayer(roomCode, targetIndex);
+          showToast(`${player.name} removed from room`);
+        } catch (err) {
+          console.error('Failed to remove player:', err);
+          showToast('Failed to remove player');
+          removeBtn.disabled = false;
+        }
+      });
+      li.appendChild(removeBtn);
     }
     list.appendChild(li);
   });

@@ -221,6 +221,16 @@ export async function leavePlayer(roomCode, playerIndex) {
   );
 }
 
+/**
+ * Host removes a player from the lobby (kick).
+ * Similar to leavePlayer but can be called by the host on any player.
+ */
+export async function removePlayer(roomCode, playerIndex) {
+  await firebaseRetry(() =>
+    remove(ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}`))
+  );
+}
+
 export async function endRoom(roomCode) {
   await firebaseRetry(() =>
     update(ref(db, `${ROOM_PATH}/${roomCode}/meta`), {
