@@ -1198,13 +1198,6 @@ async function handleOpenApp(isMobile) {
 /* ======= INIT ======= */
 
 async function init() {
-  // Initialize deep link handler
-  initDeepLinkHandler({
-    roomInputId: 'room-code-input',
-    joinScreenId: 'join-room',
-    gameName: 'Snakes & Ladders MP'
-  });
-
   wireOnlineChoice();
   wireCreateRoom();
   wireJoinRoom();
@@ -1217,31 +1210,16 @@ async function init() {
   wireColorPicker('.create-color-picker');
   wireColorPicker('.join-color-picker');
 
-  // Check for room code in URL (e.g., ?room=ABCD)
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlRoomCode = urlParams.get('room');
+  // Initialize deep link handler - handles URL room codes automatically
+  const urlRoomCode = initDeepLinkHandler({
+    roomInputId: 'room-code-input',
+    joinScreenId: 'join-room',
+    gameName: 'Snakes & Ladders MP',
+    showScreenFn: showScreen
+  });
   
-  if (urlRoomCode) {
-    // Clean URL after extracting room code
-    window.history.replaceState({}, '', window.location.pathname);
-    
-    // Auto-fill room code and show join screen
-    const roomInput = document.getElementById('room-code-input');
-    if (roomInput) {
-      roomInput.value = urlRoomCode.toUpperCase();
-    }
-    showScreen('join-room');
-    showToast('Room code filled from link!');
-    
-    // Check if opened in browser (not PWA) and show app banner
-    const isPWA = window.matchMedia('(display-mode: standalone)').matches;
-    if (!isPWA) {
-      // Show banner after a short delay so user sees the join screen first
-      setTimeout(() => showAppBanner(), 800);
-    }
-    
-    return;
-  }
+  // If deep link handled the room code, we're done
+  if (urlRoomCode) return;
 
   // Try restoring an existing session before showing the choice screen
   const restored = await checkSession();

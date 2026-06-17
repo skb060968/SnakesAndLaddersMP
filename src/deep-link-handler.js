@@ -39,11 +39,12 @@ window.addEventListener('beforeinstallprompt', (e) => {
  * Initialize deep link handling on page load
  * @param {Object} options - Configuration options
  * @param {string} options.roomInputId - ID of the room code input element
- * @param {string} options.joinScreenId - ID of the join screen element
+ * @param {string} options.joinScreenId - ID of the join screen element (optional)
  * @param {string} options.gameName - Name of the game for toast messages
+ * @param {Function} options.showScreenFn - Optional custom function to show screens
  * @returns {string|null} - Room code from URL if present, null otherwise
  */
-export function initDeepLinkHandler({ roomInputId, joinScreenId, gameName }) {
+export function initDeepLinkHandler({ roomInputId, joinScreenId, gameName, showScreenFn }) {
   // Check for room code in URL (e.g., ?room=ABCD)
   const urlParams = new URLSearchParams(window.location.search);
   const urlRoomCode = urlParams.get('room');
@@ -61,9 +62,15 @@ export function initDeepLinkHandler({ roomInputId, joinScreenId, gameName }) {
   
   // Show join screen if provided
   if (joinScreenId) {
-    const screen = document.getElementById(joinScreenId);
-    if (screen) {
-      screen.removeAttribute('hidden');
+    if (showScreenFn && typeof showScreenFn === 'function') {
+      // Use custom screen function if provided
+      showScreenFn(joinScreenId);
+    } else {
+      // Fallback to direct manipulation
+      const screen = document.getElementById(joinScreenId);
+      if (screen) {
+        screen.removeAttribute('hidden');
+      }
     }
   }
   
