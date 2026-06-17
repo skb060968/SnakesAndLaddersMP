@@ -300,6 +300,31 @@ function setupLobby() {
   // Re-enable the leave button in case it was disabled from a previous leave attempt
   const btnLeave = document.getElementById('btn-leave-lobby');
   if (btnLeave) btnLeave.disabled = false;
+  
+  // Set up delegated event listener for remove buttons (only once)
+  const playerList = document.getElementById('lobby-player-list');
+  if (playerList && !playerList.dataset.removeListenerAdded) {
+    playerList.dataset.removeListenerAdded = 'true';
+    playerList.addEventListener('click', async (e) => {
+      const removeBtn = e.target.closest('.remove-player-btn');
+      if (!removeBtn || removeBtn.disabled) return;
+      
+      const targetIndex = parseInt(removeBtn.dataset.playerIndex, 10);
+      const playerName = removeBtn.dataset.playerName;
+      
+      if (isNaN(targetIndex) || !roomCode) return;
+      
+      removeBtn.disabled = true;
+      try {
+        await removePlayer(roomCode, targetIndex);
+        showToast(`${playerName} removed from room`);
+      } catch (err) {
+        console.error('Failed to remove player:', err);
+        showToast('Failed to remove player');
+        removeBtn.disabled = false;
+      }
+    });
+  }
 
   setupDisconnectHandler(roomCode, playerIndex);
   if (unsubscribeRoom) unsubscribeRoom();
@@ -387,37 +412,13 @@ function renderLobbyPlayers(playersArr, playerKeys = []) {
       removeBtn.className = 'remove-player-btn';
       removeBtn.textContent = '✕';
       removeBtn.title = 'Remove player';
-      removeBtn.addEventListener('click', async () => {
-        console.log('Remove button clicked', { roomCode, index, playerKeys });
-        if (!roomCode) {
-          console.error('No roomCode');
-          return;
-        }
-        // Extract player index from the key (e.g., "player_2" -> 2)
-        const playerKey = playerKeys[index];
-        console.log('Player key:', playerKey);
-        if (!playerKey) {
-          console.error('No playerKey found at index', index);
-          return;
-        }
+      // Store player info in data attributes for event delegation
+      const playerKey = playerKeys[index];
+      if (playerKey) {
         const targetIndex = parseInt(playerKey.replace('player_', ''), 10);
-        console.log('Target index:', targetIndex);
-        if (isNaN(targetIndex)) {
-          console.error('Invalid target index');
-          return;
-        }
-        
-        removeBtn.disabled = true;
-        try {
-          console.log('Calling removePlayer', roomCode, targetIndex);
-          await removePlayer(roomCode, targetIndex);
-          showToast(`${player.name} removed from room`);
-        } catch (err) {
-          console.error('Failed to remove player:', err);
-          showToast('Failed to remove player');
-          removeBtn.disabled = false;
-        }
-      });
+        removeBtn.dataset.playerIndex = targetIndex;
+        removeBtn.dataset.playerName = player.name;
+      }
       li.appendChild(removeBtn);
     }
     list.appendChild(li);
