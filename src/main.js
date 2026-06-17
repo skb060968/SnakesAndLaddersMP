@@ -295,6 +295,10 @@ function setupLobby() {
     if (btnStart) btnStart.hidden = true;
     if (waiting) waiting.hidden = false;
   }
+  
+  // Re-enable the leave button in case it was disabled from a previous leave attempt
+  const btnLeave = document.getElementById('btn-leave-lobby');
+  if (btnLeave) btnLeave.disabled = false;
 
   setupDisconnectHandler(roomCode, playerIndex);
   if (unsubscribeRoom) unsubscribeRoom();
