@@ -420,12 +420,22 @@ function wireLobby() {
 
   const btnLeave = document.getElementById('btn-leave-lobby');
   if (btnLeave) btnLeave.addEventListener('click', async () => {
-    if (isHost && roomCode) {
-      try { await deleteRoom(roomCode); } catch (_) {}
-    } else if (roomCode && playerIndex != null) {
-      try { await leavePlayer(roomCode, playerIndex); } catch (_) {}
+    // Disable button to prevent double-clicks
+    btnLeave.disabled = true;
+    
+    try {
+      if (isHost && roomCode) {
+        await deleteRoom(roomCode);
+      } else if (roomCode && playerIndex != null) {
+        // Important: await the leave operation to complete BEFORE cleanup
+        // so Firebase actually removes the player node before we navigate away
+        await leavePlayer(roomCode, playerIndex);
+      }
+    } catch (err) {
+      console.error('Leave failed:', err);
+    } finally {
+      cleanupAndGoHome();
     }
-    cleanupAndGoHome();
   });
 }
 
