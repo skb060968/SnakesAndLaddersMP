@@ -92,7 +92,7 @@ function cleanupAndGoHome() {
   playerNames = [];
   state = null;
   _resultsShown = false;
-  showScreen('online-choice');
+  showScreen('home');
 }
 
 /* ======= EMOJI PICKER ======= */
@@ -161,6 +161,19 @@ function applyTakenColors(selector, takenColors) {
   }
 }
 
+/* ======= HOME SCREEN ======= */
+
+function wireHomeScreen() {
+  const btnHost = document.getElementById('btn-home-host');
+  const btnJoin = document.getElementById('btn-home-join');
+  if (btnHost) btnHost.addEventListener('click', () => showScreen('create-room'));
+  if (btnJoin) btnJoin.addEventListener('click', () => {
+    showScreen('join-room');
+    // Reset taken-colors picker since user may be retrying with a new code
+    applyTakenColors('.join-color-picker', []);
+  });
+}
+
 /* ======= ONLINE CHOICE SCREEN ======= */
 
 function wireOnlineChoice() {
@@ -200,7 +213,7 @@ function wireCreateRoom() {
     }
   });
 
-  if (btnBack) btnBack.addEventListener('click', () => showScreen('online-choice'));
+  if (btnBack) btnBack.addEventListener('click', () => showScreen('home'));
 }
 
 /* ======= JOIN ROOM ======= */
@@ -275,7 +288,7 @@ function wireJoinRoom() {
 
   if (btnBack) btnBack.addEventListener('click', () => {
     stopJoinPreviewListener();
-    showScreen('online-choice');
+    showScreen('home');
   });
 }
 
@@ -1253,6 +1266,7 @@ async function handleOpenApp(isMobile) {
 /* ======= INIT ======= */
 
 async function init() {
+  wireHomeScreen();
   wireOnlineChoice();
   wireCreateRoom();
   wireJoinRoom();
@@ -1287,9 +1301,9 @@ async function init() {
     return;
   }
 
-  // Try restoring an existing session before showing the choice screen
+  // Try restoring an existing session before showing the home screen
   const restored = await checkSession();
-  if (!restored) showScreen('online-choice');
+  if (!restored) showScreen('home');
 }
 
 init();
