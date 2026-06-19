@@ -61,6 +61,44 @@ body {
 
 .screen[hidden] { display: none !important; }
 
+/* ======= HOME SCREEN ======= */
+
+.home-screen { 
+  justify-content: center; 
+  min-height: 100svh;
+}
+
+.home-header { 
+  text-align: center; 
+  margin-bottom: 16px; 
+}
+
+.home-title {
+  font-family: Georgia, serif;
+  font-size: clamp(2rem, 6vw, 3.4rem);
+  text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  color: #fff;
+}
+
+.home-subtitle { 
+  opacity: 0.85; 
+  margin-top: 6px;
+  color: #fff;
+}
+
+.home-buttons { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 14px; 
+  width: 100%; 
+  max-width: 360px; 
+}
+
+.home-buttons .btn.big { 
+  padding: 16px 18px; 
+  font-size: 1.1rem; 
+}
+
 /* ======= 3) HEADERS / TYPOGRAPHY ======= */
 
 .title {
@@ -111,6 +149,12 @@ body {
     transform 0.12s ease,
     box-shadow 0.12s ease,
     filter 0.12s ease;
+}
+
+.btn.big { 
+  padding: 16px 18px; 
+  font-size: 1.1rem;
+  max-width: 320px;
 }
 
 .btn.primary {
