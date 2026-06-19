@@ -174,19 +174,6 @@ function wireHomeScreen() {
   });
 }
 
-/* ======= ONLINE CHOICE SCREEN ======= */
-
-function wireOnlineChoice() {
-  const btnCreate = document.getElementById('btn-create-room');
-  const btnJoin = document.getElementById('btn-join-room');
-  if (btnCreate) btnCreate.addEventListener('click', () => showScreen('create-room'));
-  if (btnJoin) btnJoin.addEventListener('click', () => {
-    showScreen('join-room');
-    // Reset taken-colors picker since user may be retrying with a new code
-    applyTakenColors('.join-color-picker', []);
-  });
-}
-
 /* ======= CREATE ROOM ======= */
 
 function wireCreateRoom() {
@@ -1267,7 +1254,6 @@ async function handleOpenApp(isMobile) {
 
 async function init() {
   wireHomeScreen();
-  wireOnlineChoice();
   wireCreateRoom();
   wireJoinRoom();
   wireLobby();
