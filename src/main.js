@@ -696,15 +696,15 @@ async function runOutcomeAnimation(outcome) {
         await animateSnakeOrLadder(idx, outcome.snakeLadderTo, 'ladder', positions);
         setMessage(`🪜 Ladder! up to ${outcome.snakeLadderTo} — ${state.players[idx].name} gets a bonus turn!`);
       }
-      // Show capture message if someone was sent back
+      // Animate capture immediately: send captured token back to start
       if (outcome.capturedPlayer != null) {
         const capturedName = state.players[outcome.capturedPlayer].name;
-        setTimeout(() => {
-          setMessage(`⚔️ ${capturedName} was captured and sent back to start!`);
-        }, 800);
-        await new Promise((r) => setTimeout(r, 1500));
+        positions[outcome.capturedPlayer] = 0;
+        placeTokens(positions);
+        setMessage(`⚔️ ${capturedName} was captured and sent back to start!`);
+        await new Promise((r) => setTimeout(r, 1200));
       }
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 800));
       break;
 
     case 'win-with-sixes':
@@ -723,13 +723,14 @@ async function runOutcomeAnimation(outcome) {
             : `🐍 Snake! down to ${outcome.snakeLadderTo}`,
         );
       }
-      // Show capture message if someone was sent back
+      // Animate capture immediately: send captured token back to start
       if (outcome.capturedPlayer != null) {
         const capturedName = state.players[outcome.capturedPlayer].name;
-        setTimeout(() => {
-          setMessage(`⚔️ ${capturedName} was captured and sent back to start!`);
-        }, 800);
-        await new Promise((r) => setTimeout(r, 1500));
+        positions[outcome.capturedPlayer] = 0;
+        placeTokens(positions);
+        await new Promise((r) => setTimeout(r, 400));
+        setMessage(`⚔️ ${capturedName} was captured and sent back to start!`);
+        await new Promise((r) => setTimeout(r, 1200));
       }
       break;
     }
