@@ -613,6 +613,7 @@ async function handleRoll() {
     steps: outcome.steps || 0,
     landing: outcome.landing != null ? outcome.landing : null,
     snakeLadderTo: outcome.snakeLadderTo != null ? outcome.snakeLadderTo : null,
+    capturedPlayer: outcome.capturedPlayer != null ? outcome.capturedPlayer : null,
     win: !!outcome.win,
     timestamp: moveTimestamp,
   };
@@ -687,6 +688,25 @@ async function runOutcomeAnimation(outcome) {
       await new Promise((r) => setTimeout(r, 700));
       break;
 
+    case 'ladder-bonus':
+      // Player climbed a ladder and gets bonus turn
+      setMessage('');
+      await animateSteps(idx, outcome.steps, positions);
+      if (outcome.snakeLadderTo != null) {
+        await animateSnakeOrLadder(idx, outcome.snakeLadderTo, 'ladder', positions);
+        setMessage(`🪜 Ladder! up to ${outcome.snakeLadderTo} — ${state.players[idx].name} gets a bonus turn!`);
+      }
+      // Show capture message if someone was sent back
+      if (outcome.capturedPlayer != null) {
+        const capturedName = state.players[outcome.capturedPlayer].name;
+        setTimeout(() => {
+          setMessage(`⚔️ ${capturedName} was captured and sent back to start!`);
+        }, 800);
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+      break;
+
     case 'win-with-sixes':
     case 'normal-move':
     case 'win-normal': {
@@ -702,6 +722,14 @@ async function runOutcomeAnimation(outcome) {
             ? `🪜 Ladder! up to ${outcome.snakeLadderTo}`
             : `🐍 Snake! down to ${outcome.snakeLadderTo}`,
         );
+      }
+      // Show capture message if someone was sent back
+      if (outcome.capturedPlayer != null) {
+        const capturedName = state.players[outcome.capturedPlayer].name;
+        setTimeout(() => {
+          setMessage(`⚔️ ${capturedName} was captured and sent back to start!`);
+        }, 800);
+        await new Promise((r) => setTimeout(r, 1500));
       }
       break;
     }

@@ -95,14 +95,16 @@ export function nextPlayerIndex(state) {
  *   'six-bonus' — non-winning six; player rolls again
  *   'win-with-sixes' — accumulated + this six lands exactly on 100
  *   'normal-move' — moved by (accumulatedSteps + roll), check snake/ladder
+ *   'ladder-bonus' — climbed a ladder; player rolls again
  *
- * For 'normal-move' and 'win-with-sixes', `outcome.steps` is the number of
+ * For 'normal-move', 'win-with-sixes', and 'ladder-bonus', `outcome.steps` is the number of
  * forward steps to animate. `outcome.landing` is the square reached BEFORE
  * snake/ladder resolution. `outcome.snakeLadderTo` (optional) is the post-
- * snake-or-ladder square. `outcome.win` is true if the player won.
+ * snake-or-ladder square. `outcome.capturedPlayer` (optional) is the index of
+ * a player whose token was sent back to start. `outcome.win` is true if the player won.
  *
  * The returned `state` reflects the new turn after this roll resolves
- * (turn advanced if move/forfeit, same player if six-bonus).
+ * (turn advanced if move/forfeit, same player if six-bonus or ladder-bonus).
  *
  * @param {object} state
  * @param {number} roll  — 1..6
@@ -203,17 +205,30 @@ export function applyRoll(state, roll) {
   const landing = finalIntended;
   let finalPos = landing;
   let snakeLadderTo = null;
+  let climbedLadder = false;
+  
   if (LADDERS[landing] != null) {
     finalPos = LADDERS[landing];
     snakeLadderTo = finalPos;
+    climbedLadder = true;
   } else if (SNAKES[landing] != null) {
     finalPos = SNAKES[landing];
     snakeLadderTo = finalPos;
   }
 
+  // Check for capture: if another player is at finalPos, send them back to start (position 0)
+  let capturedPlayer = null;
+  const updatedPlayers = state.players.map((p, i) => {
+    if (i !== idx && p.position === finalPos && finalPos !== TOTAL && finalPos > 0) {
+      capturedPlayer = i;
+      return { ...p, position: 0 }; // Send captured player back to start
+    }
+    return p;
+  });
+
   const won = finalPos === TOTAL;
 
-  const newPlayers = state.players.map((p, i) =>
+  const newPlayers = updatedPlayers.map((p, i) =>
     i === idx
       ? {
           ...p,
@@ -225,6 +240,28 @@ export function applyRoll(state, roll) {
       : p
   );
 
+  // If climbed a ladder (and didn't win), give bonus turn
+  if (climbedLadder && !won) {
+    return {
+      outcome: {
+        kind: 'ladder-bonus',
+        roll,
+        by: idx,
+        steps: totalSteps,
+        landing,
+        snakeLadderTo,
+        capturedPlayer,
+        win: false,
+      },
+      state: {
+        ...state,
+        players: newPlayers,
+        status: 'playing',
+        // currentPlayerIndex stays the same for bonus turn
+      },
+    };
+  }
+
   return {
     outcome: {
       kind: won ? 'win-normal' : 'normal-move',
@@ -233,6 +270,7 @@ export function applyRoll(state, roll) {
       steps: totalSteps,
       landing,
       snakeLadderTo,
+      capturedPlayer,
       win: won,
     },
     state: {
