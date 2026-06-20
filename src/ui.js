@@ -422,6 +422,62 @@ export function animateSnakeOrLadder(playerIdx, targetCell, type, currentPositio
   });
 }
 
+/**
+ * Animates a token being captured and sent back to position 0 (start).
+ * Shows penalty glow effect while the token flies back.
+ * @param {number} capturedPlayerIdx - Index of the captured player
+ * @param {Array<number>} currentPositions - Current positions array for animation tracking
+ * @returns {Promise<void>}
+ */
+export function animateCaptureToken(capturedPlayerIdx, currentPositions) {
+  return new Promise((resolve) => {
+    const tok = document.getElementById(`token${capturedPlayerIdx}`);
+    if (!tok) { resolve(); return; }
+
+    const startPos = currentPositions[capturedPlayerIdx];
+    if (startPos === 0) { resolve(); return; } // Already at start
+
+    // Apply penalty glow effect
+    tok.classList.add('penalty');
+
+    // Get start and end positions for animation
+    const start = getCellCenter(startPos);
+    // Virtual square 0 is one cell-width to the left of square 1
+    const c1 = getCellCenter(1);
+    const gridEl = document.getElementById('grid');
+    const cell1 = gridEl ? gridEl.querySelector('[data-cell="1"]') : null;
+    const cellW = cell1 ? cell1.getBoundingClientRect().width : 0;
+    const end = { x: c1.x - cellW, y: c1.y };
+
+    // Animate the token flying back to position 0
+    const frames = 30; // Longer animation for visibility
+    let frame = 0;
+    const flyBack = setInterval(() => {
+      frame++;
+      const t = frame / frames;
+      // Ease-in-out for smooth motion
+      const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      const x = start.x + (end.x - start.x) * ease;
+      const y = start.y + (end.y - start.y) * ease;
+      // Add a slight arc to the movement
+      const arc = Math.sin(Math.PI * t) * 20;
+      tok.style.left = `${x}px`;
+      tok.style.top = `${y - arc}px`;
+
+      if (frame >= frames) {
+        clearInterval(flyBack);
+        // Remove penalty effect after animation completes
+        setTimeout(() => {
+          tok.classList.remove('penalty');
+        }, 300);
+        currentPositions[capturedPlayerIdx] = 0;
+        placeTokens(currentPositions);
+        resolve();
+      }
+    }, 25); // 30 frames * 25ms = 750ms total animation
+  });
+}
+
 /* ======= MESSAGE / TURN / POSITIONS ======= */
 
 export function setMessage(text) {

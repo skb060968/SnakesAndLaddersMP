@@ -42,6 +42,7 @@ import {
   resetDice,
   animateSteps,
   animateSnakeOrLadder,
+  animateCaptureToken,
   playSound,
   setMessage,
   setTurn,
@@ -694,17 +695,18 @@ async function runOutcomeAnimation(outcome) {
       await animateSteps(idx, outcome.steps, positions);
       if (outcome.snakeLadderTo != null) {
         await animateSnakeOrLadder(idx, outcome.snakeLadderTo, 'ladder', positions);
-        setMessage(`🪜 Ladder! up to ${outcome.snakeLadderTo} — ${state.players[idx].name} gets a bonus turn!`);
       }
-      // Animate capture immediately: send captured token back to start
+      // Animate capture with penalty glow effect
       if (outcome.capturedPlayer != null) {
         const capturedName = state.players[outcome.capturedPlayer].name;
-        positions[outcome.capturedPlayer] = 0;
-        placeTokens(positions);
-        setMessage(`⚔️ ${capturedName} was captured and sent back to start!`);
-        await new Promise((r) => setTimeout(r, 1200));
+        setMessage(`⚔️ ${capturedName} was captured!`);
+        await animateCaptureToken(outcome.capturedPlayer, positions);
+        setMessage(`⚔️ ${capturedName} sent back to start! 🪜 Ladder bonus: roll again!`);
+        await new Promise((r) => setTimeout(r, 1000));
+      } else {
+        setMessage(`🪜 Ladder! up to ${outcome.snakeLadderTo} — ${state.players[idx].name} gets a bonus turn!`);
+        await new Promise((r) => setTimeout(r, 800));
       }
-      await new Promise((r) => setTimeout(r, 800));
       break;
 
     case 'win-with-sixes':
@@ -723,14 +725,14 @@ async function runOutcomeAnimation(outcome) {
             : `🐍 Snake! down to ${outcome.snakeLadderTo}`,
         );
       }
-      // Animate capture immediately: send captured token back to start
+      // Animate capture with penalty glow effect
       if (outcome.capturedPlayer != null) {
         const capturedName = state.players[outcome.capturedPlayer].name;
-        positions[outcome.capturedPlayer] = 0;
-        placeTokens(positions);
         await new Promise((r) => setTimeout(r, 400));
-        setMessage(`⚔️ ${capturedName} was captured and sent back to start!`);
-        await new Promise((r) => setTimeout(r, 1200));
+        setMessage(`⚔️ ${capturedName} was captured!`);
+        await animateCaptureToken(outcome.capturedPlayer, positions);
+        setMessage(`⚔️ ${capturedName} sent back to start!`);
+        await new Promise((r) => setTimeout(r, 1000));
       }
       break;
     }
