@@ -288,6 +288,7 @@ function wireJoinRoom() {
 /* ======= LOBBY ======= */
 
 function setupLobby() {
+  stopBackgroundMusic(); // Stop music when entering lobby
   showScreen('lobby');
 
   const codeEl = document.getElementById('lobby-room-code');
