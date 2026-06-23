@@ -50,11 +50,76 @@ try {
   if (v === '1') _muted = true;
 } catch (_) {}
 
+/* ======= BACKGROUND MUSIC ======= */
+
+let backgroundMusic = null;
+
+function pauseBackgroundMusic() {
+  if (backgroundMusic) {
+    try {
+      backgroundMusic.pause();
+    } catch (_) {}
+  }
+}
+
+function resumeBackgroundMusic() {
+  if (backgroundMusic && backgroundMusic.paused && !_muted) {
+    try {
+      backgroundMusic.play().catch(() => {});
+    } catch (_) {}
+  }
+}
+
+export function startBackgroundMusic() {
+  if (_muted) return;
+  if (backgroundMusic) return; // Already playing
+  
+  try {
+    backgroundMusic = new Audio(soundFiles.music);
+    backgroundMusic.loop = true;
+    backgroundMusic.volume = 0.10; // 10% volume
+    backgroundMusic.play().catch(() => {
+      backgroundMusic = null;
+    });
+  } catch (_) {
+    backgroundMusic = null;
+  }
+}
+
+export function stopBackgroundMusic() {
+  if (backgroundMusic) {
+    try {
+      backgroundMusic.pause();
+      backgroundMusic.currentTime = 0;
+      backgroundMusic = null;
+    } catch (_) {}
+  }
+}
+
+export function setBackgroundMusicVolume(volume) {
+  if (backgroundMusic) {
+    try {
+      backgroundMusic.volume = Math.max(0, Math.min(1, volume));
+    } catch (_) {}
+  }
+}
+
+export { pauseBackgroundMusic, resumeBackgroundMusic };
+
+/* ======= MUTE CONTROLS ======= */
+
 export function isMuted() { return _muted; }
 
 export function setMuted(value) {
   _muted = !!value;
   try { localStorage.setItem(MUTE_KEY, _muted ? '1' : '0'); } catch (_) {}
+  
+  // Pause or resume background music based on mute state
+  if (_muted) {
+    pauseBackgroundMusic();
+  } else {
+    resumeBackgroundMusic();
+  }
 }
 
 export function toggleMute() {
@@ -97,60 +162,6 @@ export function playSound(name) {
     const a = new Audio(soundFiles[name]);
     a.play().catch(() => {});
   } catch (_) {}
-}
-
-/* ======= BACKGROUND MUSIC ======= */
-
-let backgroundMusic = null;
-
-export function startBackgroundMusic() {
-  if (_muted) return;
-  if (backgroundMusic) return; // Already playing
-  
-  try {
-    backgroundMusic = new Audio(soundFiles.music);
-    backgroundMusic.loop = true;
-    backgroundMusic.volume = 0.15; // 15% volume
-    backgroundMusic.play().catch(() => {
-      backgroundMusic = null;
-    });
-  } catch (_) {
-    backgroundMusic = null;
-  }
-}
-
-export function stopBackgroundMusic() {
-  if (backgroundMusic) {
-    try {
-      backgroundMusic.pause();
-      backgroundMusic.currentTime = 0;
-      backgroundMusic = null;
-    } catch (_) {}
-  }
-}
-
-export function pauseBackgroundMusic() {
-  if (backgroundMusic) {
-    try {
-      backgroundMusic.pause();
-    } catch (_) {}
-  }
-}
-
-export function resumeBackgroundMusic() {
-  if (backgroundMusic && backgroundMusic.paused && !_muted) {
-    try {
-      backgroundMusic.play().catch(() => {});
-    } catch (_) {}
-  }
-}
-
-export function setBackgroundMusicVolume(volume) {
-  if (backgroundMusic) {
-    try {
-      backgroundMusic.volume = Math.max(0, Math.min(1, volume));
-    } catch (_) {}
-  }
 }
 
 /* ======= BOARD SKIN ======= */
