@@ -36,6 +36,7 @@ const soundFiles = {
   snake: '/sounds/snake.mp3',
   ladder: '/sounds/ladder.mp3',
   win: '/sounds/win.mp3',
+  music: '/sounds/music.mp3',
 };
 
 let audioCtx = null;
@@ -96,6 +97,60 @@ export function playSound(name) {
     const a = new Audio(soundFiles[name]);
     a.play().catch(() => {});
   } catch (_) {}
+}
+
+/* ======= BACKGROUND MUSIC ======= */
+
+let backgroundMusic = null;
+
+export function startBackgroundMusic() {
+  if (_muted) return;
+  if (backgroundMusic) return; // Already playing
+  
+  try {
+    backgroundMusic = new Audio(soundFiles.music);
+    backgroundMusic.loop = true;
+    backgroundMusic.volume = 0.15; // 15% volume
+    backgroundMusic.play().catch(() => {
+      backgroundMusic = null;
+    });
+  } catch (_) {
+    backgroundMusic = null;
+  }
+}
+
+export function stopBackgroundMusic() {
+  if (backgroundMusic) {
+    try {
+      backgroundMusic.pause();
+      backgroundMusic.currentTime = 0;
+      backgroundMusic = null;
+    } catch (_) {}
+  }
+}
+
+export function pauseBackgroundMusic() {
+  if (backgroundMusic) {
+    try {
+      backgroundMusic.pause();
+    } catch (_) {}
+  }
+}
+
+export function resumeBackgroundMusic() {
+  if (backgroundMusic && backgroundMusic.paused && !_muted) {
+    try {
+      backgroundMusic.play().catch(() => {});
+    } catch (_) {}
+  }
+}
+
+export function setBackgroundMusicVolume(volume) {
+  if (backgroundMusic) {
+    try {
+      backgroundMusic.volume = Math.max(0, Math.min(1, volume));
+    } catch (_) {}
+  }
 }
 
 /* ======= BOARD SKIN ======= */

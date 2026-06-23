@@ -50,6 +50,10 @@ import {
   setRollButtonState,
   isMuted,
   toggleMute,
+  startBackgroundMusic,
+  stopBackgroundMusic,
+  pauseBackgroundMusic,
+  resumeBackgroundMusic,
 } from './ui.js';
 import { db } from './firebase-config.js';
 import { ref, get, update, onValue, off } from 'firebase/database';
@@ -86,6 +90,7 @@ function loadSession() {
 
 function cleanupAndGoHome() {
   if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
+  stopBackgroundMusic(); // Stop music when leaving game
   clearSession();
   roomCode = null;
   playerIndex = null;
@@ -495,6 +500,9 @@ function startGame() {
   _isAnimating = false;
   _lastProcessedMoveTimestamp = 0;
   showScreen('gameplay');
+  
+  // Start background music at 15% volume
+  startBackgroundMusic();
 
   const endBtn = document.getElementById('btn-end-game');
   if (endBtn) endBtn.hidden = !isHost;
@@ -854,6 +862,10 @@ function buildPlayersData() {
 function handleWin() {
   if (_resultsShown) { renderResults(state); showScreen('results'); return; }
   _resultsShown = true;
+  
+  // Stop background music when game ends
+  stopBackgroundMusic();
+  
   if (state.winnerIndex != null) {
     try { playSound('win'); } catch (_) {}
     if (typeof confetti === 'function') {

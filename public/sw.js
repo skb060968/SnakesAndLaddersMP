@@ -4,7 +4,7 @@
    - Cache-first for static assets (images, sounds, icons)
    ============================== */
 
-const CACHE_NAME = "snl-mp-v28";
+const CACHE_NAME = "snl-mp-v29";
 
 const STATIC_ASSETS = [
   "/",
@@ -34,6 +34,7 @@ const STATIC_ASSETS = [
   "/sounds/snake.mp3",
   "/sounds/ladder.mp3",
   "/sounds/win.mp3",
+  "/sounds/music.mp3",
 ];
 
 self.addEventListener("install", (event) => {
