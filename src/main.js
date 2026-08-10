@@ -19,7 +19,6 @@ import {
   resetRoom,
   startGameState,
   commitMove,
-  setSharedBoardIndex,
   firebaseRetry,
   setPlayerReady,
 } from './firebase-sync.js';
@@ -354,7 +353,7 @@ function setupLobby() {
       // Pass both the players array and their keys for rendering
       renderLobbyPlayers(arr, keys);
     },
-    onStatusChange: async (status) => {
+    onStatusChange: async (status, roomSnapshot) => {
       // Only initialize game flow on the FIRST transition to active.
       // Listener fires on every update, but state stays null until startGame runs.
       if (status === 'active' && !isHost && state == null) {
@@ -378,8 +377,13 @@ function setupLobby() {
         const lobby = document.getElementById('lobby');
         if (!lobby || lobby.hasAttribute('hidden')) setupLobby();
       }
-      if (status === 'ended' && state?.status === 'finished') {
-        handleWin();
+      if (status === 'ended') {
+        if (roomSnapshot?.game?.status === 'finished') {
+          if (state?.status === 'finished') handleWin();
+        } else if (state) {
+          state = { ...state, status: 'finished', winnerIndex: null };
+          handleWin();
+        }
       }
     },
     onGameUpdate: (gameData, lastMove) => {
@@ -528,7 +532,7 @@ function startGame() {
 
   // Build the board
   buildGrid();
-  setBoardSkin(state.boardIndex || 0);
+  setBoardSkin(getBoardIndex());
   createTokens(state.players.map((p) => p.color || 'red'));
   // Place tokens at initial positions — defer to next two frames so the
   // gameplay screen's layout (just unhidden via showScreen) has fully
@@ -561,19 +565,9 @@ function startGame() {
   renderUI();
 }
 
-async function handleBoardToggle() {
-  if (!state || !roomCode) return;
-  const next = (getBoardIndex() + 1) % 3;
-  try {
-    const committed = await setSharedBoardIndex(roomCode, next);
-    state = deserializeState(committed, roomPlayers);
-    setBoardSkin(next);
-    renderUI();
-  } catch (error) {
-    console.error('Board sync failed:', error);
-    showToast('Could not change the board.');
-    setBoardSkin(state.boardIndex || 0);
-  }
+function handleBoardToggle() {
+  if (!state) return;
+  setBoardSkin((getBoardIndex() + 1) % 3);
 }
 
 function localStateIndex() {
@@ -815,7 +809,6 @@ async function handleRemoteUpdate(gameData, lastMove) {
   if (!state || isNewRound || revisionGap || !remoteRoller) {
     state = newState;
     _lastProcessedRevision = Math.max(_lastProcessedRevision, newState.revision);
-    if (state.boardIndex !== getBoardIndex()) setBoardSkin(state.boardIndex);
     placeTokens(state.players.map((player) => player.position));
     if (state.status === 'finished') handleWin();
     else renderUI();
@@ -852,16 +845,16 @@ async function handleRemoteUpdate(gameData, lastMove) {
     });
     state = newState;
     placeTokens(state.players.map((player) => player.position));
-    if (state.status === 'finished') handleWin();
-    else renderUI();
   } catch (error) {
     console.error('Remote animation error:', error);
     state = newState;
     placeTokens(state.players.map((player) => player.position));
+  } finally {
+    // Unlock before rendering so the new current player's roll button is
+    // enabled immediately after the remote animation completes.
+    _isAnimating = false;
     if (state.status === 'finished') handleWin();
     else renderUI();
-  } finally {
-    _isAnimating = false;
     drainPendingRemoteUpdate();
   }
 }
@@ -1084,7 +1077,7 @@ async function checkSession() {
     playerNames = Object.keys(roomPlayers).sort().map((slot) => roomPlayers[slot]?.name).filter(Boolean);
     await setupDisconnectHandler(roomCode, playerIndex);
 
-    const effectiveStatus = room.game?.status === 'finished'
+    const effectiveStatus = room.meta?.status === 'ended' || room.game?.status === 'finished'
       ? 'ended'
       : room.game?.status === 'playing' ? 'active' : room.meta?.status;
     if (effectiveStatus === 'lobby') {
@@ -1093,6 +1086,9 @@ async function checkSession() {
     }
     if ((effectiveStatus === 'active' || effectiveStatus === 'ended') && room.game) {
       state = deserializeState(room.game, roomPlayers);
+      if (effectiveStatus === 'ended' && room.game.status !== 'finished') {
+        state = { ...state, status: 'finished', winnerIndex: null };
+      }
       const validation = validateState(state);
       if (!validation.valid) throw new Error(validation.error);
       setupLobby();

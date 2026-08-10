@@ -168,10 +168,16 @@ export function playSound(name) {
 
 /* ======= BOARD SKIN ======= */
 
+const BOARD_SKIN_KEY = 'snl_mp_board_skin';
 let currentBoardIndex = 0;
+try {
+  const saved = Number.parseInt(localStorage.getItem(BOARD_SKIN_KEY), 10);
+  if (Number.isInteger(saved)) currentBoardIndex = ((saved % BOARD_SKINS.length) + BOARD_SKINS.length) % BOARD_SKINS.length;
+} catch (_) {}
 
 export function setBoardSkin(index) {
   currentBoardIndex = ((index % BOARD_SKINS.length) + BOARD_SKINS.length) % BOARD_SKINS.length;
+  try { localStorage.setItem(BOARD_SKIN_KEY, String(currentBoardIndex)); } catch (_) {}
   const boardImg = document.getElementById('board-img');
   if (!boardImg) return;
   boardImg.src = BOARD_SKINS[currentBoardIndex];

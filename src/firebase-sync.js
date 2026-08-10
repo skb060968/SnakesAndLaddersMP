@@ -154,10 +154,10 @@ export function listenRoom(roomCode, callbacks) {
     callbacks.onRoomSnapshot?.(room);
     callbacks.onPlayersChange?.(room.players || {});
     if (room.game) callbacks.onGameUpdate?.(room.game, room.game.lastMove || null);
-    const status = room.game?.status === 'finished'
+    const status = room.meta?.status === 'ended' || room.game?.status === 'finished'
       ? 'ended'
       : room.game?.status === 'playing' ? 'active' : room.meta?.status;
-    callbacks.onStatusChange?.(status);
+    callbacks.onStatusChange?.(status, room);
   };
   onValue(roomRef, handler, (error) => callbacks.onError?.(error));
   return () => off(roomRef, 'value', handler);
@@ -294,25 +294,14 @@ export async function setSharedBoardIndex(roomCode, boardIndex) {
 }
 
 export async function endRoom(roomCode) {
-  const user = await requireUser();
+  await requireUser();
   const code = normalizeRoomCode(roomCode);
-  const result = await runTransaction(ref(db, `${roomPath(code)}/game`), (current) => {
-    if (!current) return undefined;
-    if (current.status === 'finished') return current;
-    if (current.status !== 'playing') return undefined;
-    const revision = current.revision + 1;
-    const next = {
-      ...current,
-      status: 'finished',
-      revision,
-      operation: operation('end', user, 'player_0', current.roundId, revision),
-    };
-    delete next.winnerKey;
-    return next;
-  }, { applyLocally: false });
-  if (!result.committed) throw new Error('Unable to end this round');
+  const gameSnapshot = await get(ref(db, `${roomPath(code)}/game`));
+  if (!gameSnapshot.exists()) throw new Error('No active round');
   await update(ref(db, `${roomPath(code)}/meta`), { status: 'ended', lastActivity: now() });
-  return result.snapshot.val();
+  const ended = { ...gameSnapshot.val(), status: 'finished' };
+  delete ended.winnerKey;
+  return ended;
 }
 
 export async function resetRoom(roomCode) {
