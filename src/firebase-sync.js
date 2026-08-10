@@ -1,279 +1,359 @@
-/**
- * Firebase Sync — multi-room operations for Snakes & Ladders MP.
- *
- * Rooms stored under `snl-rooms/{roomCode}` to keep the namespace
- * separate from other games sharing the same Firebase project.
- *
- * Mirrors the proven pattern used by Card Games and Tambola.
- */
-
-import { db, auth } from './firebase-config.js';
-import { ref } from 'firebase/database';
-import { set } from 'firebase/database';
-import { get } from 'firebase/database';
-import { update } from 'firebase/database';
-import { remove } from 'firebase/database';
-import { onValue } from 'firebase/database';
-import { off } from 'firebase/database';
-import { onDisconnect } from 'firebase/database';
-
-/** Room code charset — letters only, excludes ambiguous I and O. */
-const ROOM_CODE_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+/** Secure Firebase synchronization for Snakes & Ladders MP schema v2. */
+import { db, auth, authReady } from './firebase-config.js';
+import {
+  get, off, onDisconnect, onValue, ref, remove, runTransaction, set, update,
+} from 'firebase/database';
 
 const ROOM_PATH = 'snl-rooms';
+const ROOM_CODE_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+const ROOM_CODE_RE = /^[A-HJ-NP-Z]{4}$/;
+const PLAYER_KEY_RE = /^player_([0-3])$/;
+const COLORS = new Set(['red', 'brown', 'yellow', 'green', 'blue', 'purple']);
+const TRANSIENT_CODES = new Set([
+  'database/disconnected', 'database/network-error', 'database/unavailable',
+  'unavailable', 'network-request-failed',
+]);
 
-/* ======= RETRY HELPER ======= */
+const roomPath = (code) => `${ROOM_PATH}/${normalizeRoomCode(code)}`;
+const playerKeyFor = (index) => `player_${index}`;
+const playerIndexFrom = (key) => Number.parseInt(key.replace('player_', ''), 10);
+const now = () => Date.now();
+let stopPresence = null;
 
-export async function firebaseRetry(fn, maxRetries = 2, delayMs = 500) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (attempt === maxRetries) throw err;
-      console.warn(`Firebase retry ${attempt + 1}/${maxRetries}:`, err.message);
-      await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
-    }
-  }
-}
-
-/* ======= ROOM CODE ======= */
-
-export function generateRoomCode() {
-  let code = '';
-  for (let i = 0; i < 4; i++) {
-    code += ROOM_CODE_CHARSET[Math.floor(Math.random() * ROOM_CODE_CHARSET.length)];
-  }
+function normalizeRoomCode(value) {
+  const code = String(value || '').trim().toUpperCase();
+  if (!ROOM_CODE_RE.test(code)) throw new Error('Invalid room code');
   return code;
 }
 
-/* ======= CREATE / JOIN ======= */
-
-/**
- * Creates a new room and adds the host as player_0.
- * @param {string} hostName
- * @param {string} hostEmoji
- * @param {string} hostColor — token color id ('red'|'orange'|'yellow'|'green'|'blue'|'purple')
- * @returns {Promise<{ roomCode: string, playerIndex: number }>}
- */
-export async function createRoom(hostName, hostEmoji, hostColor) {
-  const uid = auth.currentUser?.uid || 'anonymous';
-  const roomCode = generateRoomCode();
-  const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
-
-  const roomData = {
-    meta: {
-      hostUid: uid,
-      hostName,
-      status: 'lobby',
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
-    },
-    players: {
-      player_0: {
-        name: hostName,
-        emoji: hostEmoji,
-        color: hostColor || 'red',
-        uid,
-        connected: true,
-      },
-    },
-    game: null,
-    ready: {},
-  };
-
-  await firebaseRetry(() => set(roomRef, roomData));
-  return { roomCode, playerIndex: 0 };
+function cleanText(value, fallback, maxLength) {
+  const text = String(value || '').trim();
+  return (text || fallback).slice(0, maxLength);
 }
 
-/**
- * Joins an existing room. Rejects if not in lobby state, full (4 players), or
- * if the requested color is already taken by another player.
- * @returns {Promise<{ success: boolean, playerIndex?: number, reason?: string }>}
- */
+async function requireUser() {
+  const user = await authReady;
+  if (!user?.uid || auth.currentUser?.uid !== user.uid) throw new Error('Authentication unavailable');
+  return user;
+}
+
+export async function firebaseRetry(fn, maxRetries = 2, delayMs = 500) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await fn(); } catch (error) {
+      const code = String(error?.code || '').toLowerCase();
+      if (attempt >= maxRetries || !TRANSIENT_CODES.has(code)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+    }
+  }
+}
+
+export function generateRoomCode() {
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => ROOM_CODE_CHARSET[byte % ROOM_CODE_CHARSET.length]).join('');
+}
+
+export async function createRoom(hostName, hostEmoji, hostColor) {
+  const user = await requireUser();
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const roomCode = generateRoomCode();
+    const createdAt = now();
+    const room = {
+      schemaVersion: 2,
+      meta: {
+        hostUid: user.uid,
+        hostName: cleanText(hostName, 'Host', 12),
+        status: 'lobby',
+        createdAt,
+        lastActivity: createdAt,
+      },
+      players: {
+        player_0: {
+          name: cleanText(hostName, 'Host', 12),
+          emoji: cleanText(hostEmoji, '😀', 8),
+          color: COLORS.has(hostColor) ? hostColor : 'red',
+          uid: user.uid,
+          connected: true,
+          joinedAt: createdAt,
+        },
+      },
+    };
+    const result = await firebaseRetry(() => runTransaction(
+      ref(db, roomPath(roomCode)),
+      (current) => current === null ? room : undefined,
+      { applyLocally: false },
+    ));
+    if (result.committed) return { roomCode, playerIndex: 0 };
+  }
+  throw new Error('Unable to reserve a room code. Try again.');
+}
+
 export async function joinRoom(roomCode, playerName, playerEmoji, playerColor) {
-  const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
-  
-  let snapshot;
-  try {
-    snapshot = await get(roomRef);
-  } catch (err) {
-    console.error('Firebase get error:', err);
-    return { success: false, reason: 'Failed to fetch room' };
-  }
-  
+  const user = await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  const roomRef = ref(db, roomPath(code));
+  let snapshot = await firebaseRetry(() => get(roomRef));
   if (!snapshot.exists()) return { success: false, reason: 'Room not found' };
+  let room = snapshot.val();
+  if (room.schemaVersion !== 2) return { success: false, reason: 'Room version is outdated' };
 
-  const data = snapshot.val();
-  if (data.meta?.status !== 'lobby') {
-    return { success: false, reason: 'Game already in progress' };
+  const ownedKey = Object.keys(room.players || {}).find((key) => room.players[key]?.uid === user.uid);
+  if (ownedKey) {
+    await set(ref(db, `${roomPath(code)}/players/${ownedKey}/connected`), true);
+    return { success: true, playerIndex: playerIndexFrom(ownedKey) };
   }
-
-  const players = data.players || {};
-  // A "ghost" slot is one with no name (only a leftover `connected:false`
-  // written by a stale onDisconnect after the player left). Filter from
-  // the index calculation and clean up so the lobby doesn't show empty cards.
-  const ghostKeys = Object.keys(players).filter((k) => !players[k] || !players[k].name);
-  const validKeys = Object.keys(players).filter((k) => players[k] && players[k].name);
-  const existingIndices = validKeys
-    .map((k) => parseInt(k.replace('player_', ''), 10))
-    .filter((n) => !isNaN(n));
-  if (existingIndices.length >= 4) return { success: false, reason: 'Room is full' };
-
-  // Color collision check — must be a free color (only against valid players).
-  const takenColors = new Set(
-    validKeys.map((k) => players[k].color).filter(Boolean)
-  );
-  if (playerColor && takenColors.has(playerColor)) {
+  if (room.meta?.status !== 'lobby') return { success: false, reason: 'Game already in progress' };
+  const color = COLORS.has(playerColor) ? playerColor : 'red';
+  if (Object.values(room.players || {}).some((player) => player?.color === color)) {
     return { success: false, reason: 'That color is already taken' };
   }
 
-  if (ghostKeys.length > 0) {
+  for (let index = 1; index <= 3; index += 1) {
+    const key = playerKeyFor(index);
+    const joinedAt = now();
     try {
-      const cleanup = {};
-      ghostKeys.forEach((k) => { cleanup[`players/${k}`] = null; });
-      await update(ref(db, `${ROOM_PATH}/${roomCode}`), cleanup);
-    } catch (_) {}
+      const result = await runTransaction(ref(db, `${roomPath(code)}/players/${key}`), (current) => {
+        if (current !== null) return undefined;
+        return {
+          name: cleanText(playerName, 'Player', 12),
+          emoji: cleanText(playerEmoji, '😀', 8),
+          color,
+          uid: user.uid,
+          connected: true,
+          joinedAt,
+        };
+      }, { applyLocally: false });
+      if (result.committed) return { success: true, playerIndex: index };
+    } catch (error) {
+      if (String(error?.code || '').includes('permission-denied')) {
+        snapshot = await get(roomRef);
+        room = snapshot.val() || {};
+        const owned = Object.keys(room.players || {}).find((candidate) => room.players[candidate]?.uid === user.uid);
+        if (owned) return { success: true, playerIndex: playerIndexFrom(owned) };
+        if (Object.values(room.players || {}).some((player) => player?.color === color)) {
+          return { success: false, reason: 'That color is already taken' };
+        }
+        if (room.meta?.status !== 'lobby') return { success: false, reason: 'Game already in progress' };
+        continue;
+      }
+      throw error;
+    }
   }
-
-  const nextIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0;
-  const uid = auth.currentUser?.uid || 'anonymous';
-
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
-      [`players/player_${nextIndex}`]: {
-        name: playerName,
-        emoji: playerEmoji,
-        color: playerColor || 'red',
-        uid,
-        connected: true,
-      },
-      'meta/lastActivity': Date.now(),
-    })
-  );
-
-  return { success: true, playerIndex: nextIndex };
+  return { success: false, reason: 'Room is full (4 players)' };
 }
 
-/* ======= LISTEN ======= */
-
-/**
- * Subscribes to a room's live state.
- * @param {string} roomCode
- * @param {object} callbacks { onPlayersChange, onGameUpdate, onStatusChange, onRoomDeleted }
- * @returns {Function} unsubscribe
- */
 export function listenRoom(roomCode, callbacks) {
-  const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
-
+  const roomRef = ref(db, roomPath(roomCode));
   const handler = (snapshot) => {
-    if (!snapshot.exists()) {
-      if (callbacks.onRoomDeleted) callbacks.onRoomDeleted();
+    if (!snapshot.exists()) { callbacks.onRoomDeleted?.(); return; }
+    const room = snapshot.val();
+    if (room.schemaVersion !== 2) {
+      callbacks.onError?.(new Error('Unsupported room version'));
       return;
     }
-    const data = snapshot.val();
-    if (callbacks.onPlayersChange && data.players) callbacks.onPlayersChange(data.players);
-    if (callbacks.onGameUpdate && data.game) callbacks.onGameUpdate(data.game, data.lastMove || null);
-    if (callbacks.onStatusChange && data.meta) callbacks.onStatusChange(data.meta.status);
+    callbacks.onRoomSnapshot?.(room);
+    callbacks.onPlayersChange?.(room.players || {});
+    if (room.game) callbacks.onGameUpdate?.(room.game, room.game.lastMove || null);
+    const status = room.game?.status === 'finished'
+      ? 'ended'
+      : room.game?.status === 'playing' ? 'active' : room.meta?.status;
+    callbacks.onStatusChange?.(status);
   };
-
-  onValue(roomRef, handler);
+  onValue(roomRef, handler, (error) => callbacks.onError?.(error));
   return () => off(roomRef, 'value', handler);
 }
 
-/* ======= STATE WRITES ======= */
-
-/**
- * Writes full game state (used on game start and after each turn).
- */
-export async function writeGameState(roomCode, gameStateSerialized, lastMove) {
-  const updates = {
-    game: gameStateSerialized,
-    lastMove: lastMove || null,
-    'meta/lastActivity': Date.now(),
-  };
-  if (gameStateSerialized.status === 'playing') {
-    updates['meta/status'] = 'active';
+export async function setupDisconnectHandler(roomCode, playerIndex) {
+  await stopPresenceTracking();
+  const user = await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  const key = playerKeyFor(playerIndex);
+  if (!PLAYER_KEY_RE.test(key)) throw new Error('Invalid player slot');
+  const playerRef = ref(db, `${roomPath(code)}/players/${key}`);
+  const playerSnapshot = await get(playerRef);
+  if (!playerSnapshot.exists() || playerSnapshot.val()?.uid !== user.uid) {
+    throw new Error('Player session is no longer valid');
   }
-  await firebaseRetry(() => update(ref(db, `${ROOM_PATH}/${roomCode}`), updates));
+
+  const connectedRef = ref(db, `${roomPath(code)}/players/${key}/connected`);
+  const infoRef = ref(db, '.info/connected');
+  let registration = null;
+  let disposed = false;
+  const handler = async (snapshot) => {
+    if (!snapshot.val() || disposed) return;
+    try {
+      registration = onDisconnect(connectedRef);
+      await registration.set(false);
+      if (!disposed) await set(connectedRef, true);
+    } catch (error) {
+      console.warn('Presence update failed:', error.message);
+    }
+  };
+  onValue(infoRef, handler);
+  stopPresence = async () => {
+    disposed = true;
+    off(infoRef, 'value', handler);
+    try { await registration?.cancel(); } catch (_) {}
+  };
+  return stopPresence;
 }
 
-
-/* ======= ROOM LIFECYCLE ======= */
-
-/** Sets up onDisconnect to mark a player as disconnected on connection drop. */
-export function setupDisconnectHandler(roomCode, playerIndex) {
-  const connectedRef = ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}/connected`);
-  onDisconnect(connectedRef).set(false).catch((err) => {
-    console.warn('onDisconnect setup failed:', err.message);
-  });
+export async function stopPresenceTracking() {
+  const cleanup = stopPresence;
+  stopPresence = null;
+  if (cleanup) await cleanup();
 }
 
-/**
- * Player leaves the lobby. Cancels the queued onDisconnect first so it
- * doesn't fire and recreate a ghost slot after the page closes, then
- * removes the player node.
- */
-export async function leavePlayer(roomCode, playerIndex) {
-  const connectedRef = ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}/connected`);
-  try { await onDisconnect(connectedRef).cancel(); } catch (_) {}
-  await firebaseRetry(() =>
-    remove(ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}`))
-  );
+function operation(type, user, playerKey, roundId, revision) {
+  return { type, ownerUid: user.uid, playerKey, roundId, revision, timestamp: now() };
 }
 
-/**
- * Host removes a player from the lobby (kick).
- * Similar to leavePlayer but can be called by the host on any player.
- */
-export async function removePlayer(roomCode, playerIndex) {
-  await firebaseRetry(() =>
-    remove(ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}`))
-  );
+function normalizeMove(move, roundId, revision) {
+  const normalized = {
+    roller: move.roller,
+    rollerKey: move.rollerKey,
+    roll: move.roll,
+    kind: move.kind,
+    steps: move.steps || 0,
+    win: Boolean(move.win),
+    roundId,
+    revision,
+    timestamp: move.timestamp || now(),
+  };
+  if (move.landing != null) normalized.landing = move.landing;
+  if (move.snakeLadderTo != null) normalized.snakeLadderTo = move.snakeLadderTo;
+  if (move.capturedPlayer != null) normalized.capturedPlayer = move.capturedPlayer;
+  if (move.capturedPlayerKey) normalized.capturedPlayerKey = move.capturedPlayerKey;
+  return normalized;
+}
+
+export async function startGameState(roomCode, serializedState) {
+  const user = await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  const roundId = now();
+  const game = {
+    ...serializedState,
+    status: 'playing',
+    roundId,
+    revision: 0,
+    operation: operation('start', user, 'player_0', roundId, 0),
+  };
+  delete game.lastMove;
+  const result = await runTransaction(ref(db, `${roomPath(code)}/game`), (current) => (
+    current === null ? game : undefined
+  ), { applyLocally: false });
+  if (!result.committed) throw new Error('Game was already started');
+  await update(ref(db, `${roomPath(code)}/meta`), { status: 'active', lastActivity: now() });
+  return result.snapshot.val();
+}
+
+export async function commitMove(roomCode, expectedRevision, serializedState, lastMove) {
+  const user = await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  let committedGame = null;
+  const result = await runTransaction(ref(db, `${roomPath(code)}/game`), (current) => {
+    if (!current || current.status !== 'playing' || current.revision !== expectedRevision) return undefined;
+    if (current.currentPlayerKey !== lastMove.rollerKey) return undefined;
+    const revision = current.revision + 1;
+    committedGame = {
+      ...serializedState,
+      roundId: current.roundId,
+      revision,
+      operation: operation('move', user, current.currentPlayerKey, current.roundId, revision),
+      lastMove: normalizeMove(lastMove, current.roundId, revision),
+    };
+    return committedGame;
+  }, { applyLocally: false });
+  if (!result.committed) throw new Error('Turn changed before this roll was committed');
+  return result.snapshot.val();
+}
+
+async function ownedPlayerKey(code, user) {
+  const snapshot = await get(ref(db, `${roomPath(code)}/players`));
+  const players = snapshot.val() || {};
+  return Object.keys(players).find((key) => players[key]?.uid === user.uid) || null;
+}
+
+export async function setSharedBoardIndex(roomCode, boardIndex) {
+  const user = await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  const key = await ownedPlayerKey(code, user);
+  if (!key) throw new Error('Player session is no longer valid');
+  const result = await runTransaction(ref(db, `${roomPath(code)}/game`), (current) => {
+    if (!current || current.status !== 'playing') return undefined;
+    const revision = current.revision + 1;
+    return {
+      ...current,
+      boardIndex,
+      revision,
+      operation: operation('board', user, key, current.roundId, revision),
+    };
+  }, { applyLocally: false });
+  if (!result.committed) throw new Error('Unable to change board now');
+  return result.snapshot.val();
 }
 
 export async function endRoom(roomCode) {
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}/meta`), {
-      status: 'ended',
-      lastActivity: Date.now(),
-    })
-  );
+  const user = await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  const result = await runTransaction(ref(db, `${roomPath(code)}/game`), (current) => {
+    if (!current) return undefined;
+    if (current.status === 'finished') return current;
+    if (current.status !== 'playing') return undefined;
+    const revision = current.revision + 1;
+    const next = {
+      ...current,
+      status: 'finished',
+      revision,
+      operation: operation('end', user, 'player_0', current.roundId, revision),
+    };
+    delete next.winnerKey;
+    return next;
+  }, { applyLocally: false });
+  if (!result.committed) throw new Error('Unable to end this round');
+  await update(ref(db, `${roomPath(code)}/meta`), { status: 'ended', lastActivity: now() });
+  return result.snapshot.val();
+}
+
+export async function resetRoom(roomCode) {
+  await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  await update(ref(db, roomPath(code)), {
+    game: null,
+    ready: null,
+    'meta/status': 'lobby',
+    'meta/lastActivity': now(),
+  });
+}
+
+export async function leavePlayer(roomCode, playerIndex) {
+  await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  const key = playerKeyFor(playerIndex);
+  const connectedRef = ref(db, `${roomPath(code)}/players/${key}/connected`);
+  await stopPresenceTracking();
+  try { await onDisconnect(connectedRef).cancel(); } catch (_) {}
+  await remove(ref(db, `${roomPath(code)}/players/${key}`));
+}
+
+export async function removePlayer(roomCode, playerIndex) {
+  await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  const key = playerKeyFor(playerIndex);
+  if (key === 'player_0' || !PLAYER_KEY_RE.test(key)) throw new Error('Invalid player slot');
+  await remove(ref(db, `${roomPath(code)}/players/${key}`));
 }
 
 export async function deleteRoom(roomCode) {
-  await firebaseRetry(() => remove(ref(db, `${ROOM_PATH}/${roomCode}`)));
+  await requireUser();
+  await stopPresenceTracking();
+  await remove(ref(db, roomPath(roomCode)));
 }
 
-/** Resets room to lobby state for a new round. Keeps players, clears game/ready. */
-export async function resetRoom(roomCode) {
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
-      'meta/status': 'lobby',
-      'meta/lastActivity': Date.now(),
-      game: null,
-      lastMove: null,
-      ready: {},
-    })
-  );
-}
-
-/* ======= READY STATE (PLAY AGAIN) ======= */
-
-/**
- * Sets a player's ready state on the results screen.
- * Used for the "Play Again" flow:
- * - true = player clicked Play Again (green dot)
- * - 'left' = player clicked Home (red dot)
- * - undefined/null = waiting (hollow dot)
- * 
- * @param {string} roomCode
- * @param {number} playerIndex
- * @param {boolean|'left'} status
- */
 export async function setPlayerReady(roomCode, playerIndex, status) {
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}/ready`), {
-      [`player_${playerIndex}`]: status,
-    })
-  );
+  await requireUser();
+  if (status !== true && status !== 'left') throw new Error('Invalid ready status');
+  const key = playerKeyFor(playerIndex);
+  if (!PLAYER_KEY_RE.test(key)) throw new Error('Invalid player slot');
+  await set(ref(db, `${roomPath(roomCode)}/ready/${key}`), status);
 }

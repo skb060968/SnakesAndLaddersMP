@@ -217,15 +217,11 @@ async function handleOpenApp(gameName, isMobile) {
       return;
     }
     
-    // Mobile: Try to open PWA (may work if already installed)
-    const currentUrl = window.location.href;
-    window.location.href = currentUrl.replace('https://', 'web+app://');
-    
-    // Wait to see if app opened
-    setTimeout(() => {
-      // Still here? App didn't open or not installed
-      showToast('Install app: Browser menu (⋮) → "Install app"', 3500);
-    }, 1000);
+    // Browsers cannot reliably launch an installed PWA through an invented
+    // custom protocol. HTTPS app-scope links are used for room sharing; if
+    // this tab stayed open, direct the user to the platform install UI.
+    dismissAppBanner();
+    showToast('Open the installed app, or use Browser menu (⋮) → "Install app"', 4000);
     
   } catch (err) {
     console.warn('Failed to open app:', err);
@@ -297,10 +293,15 @@ export async function showQRCode(roomCode, gameName) {
   setTimeout(() => modal.classList.add('show'), 50);
   
   // Close handlers
+  const handleEscape = (event) => {
+    if (event.key === 'Escape') closeModal();
+  };
   const closeModal = () => {
+    document.removeEventListener('keydown', handleEscape);
     modal.classList.remove('show');
     setTimeout(() => modal.remove(), 300);
   };
+  document.addEventListener('keydown', handleEscape);
   
   modal.querySelector('.qr-modal-close')?.addEventListener('click', closeModal);
   modal.querySelector('.qr-modal-overlay')?.addEventListener('click', closeModal);
@@ -328,12 +329,6 @@ export async function showQRCode(roomCode, gameName) {
     }
   });
   
-  // Close on Escape key
-  const handleEscape = (e) => {
-    if (e.key === 'Escape') {
-      closeModal();
-      document.removeEventListener('keydown', handleEscape);
-    }
-  };
-  document.addEventListener('keydown', handleEscape);
+  // Escape listener is installed with the other close handlers so every
+  // close path removes it.
 }

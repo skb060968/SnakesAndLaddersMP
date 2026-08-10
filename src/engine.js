@@ -50,27 +50,34 @@ export const LADDERS = Object.freeze({
  */
 export function createGame(playerInfos) {
   const n = playerInfos.length;
-  if (n < 2 || n > 4) {
-    throw new Error(`Invalid player count: ${n}. Must be 2-4 players.`);
-  }
-
-  const players = playerInfos.map((info) => ({
-    name: info.name,
-    emoji: info.emoji,
-    color: info.color || 'red',
-    position: 0,           // 0 = in pen (off-board); 1..100 = on board
-    accumulatedSteps: 0,   // sixes "banked" awaiting a non-six
-    consecutiveSixes: 0,   // counts toward 3-six penalty
-    won: false,
-    connected: true,
-  }));
-
+  if (n < 2 || n > 4) throw new Error(`Invalid player count: ${n}. Must be 2-4 players.`);
+  const slotKeys = new Set();
+  const players = playerInfos.map((info) => {
+    const slotKey = String(info.slotKey || '');
+    if (!/^player_[0-3]$/.test(slotKey) || slotKeys.has(slotKey)) {
+      throw new Error('Invalid or duplicate player slot');
+    }
+    slotKeys.add(slotKey);
+    return {
+      slotKey,
+      name: info.name,
+      emoji: info.emoji,
+      color: info.color || 'red',
+      position: 0,
+      accumulatedSteps: 0,
+      consecutiveSixes: 0,
+      won: false,
+      connected: true,
+    };
+  });
   return {
     players,
     currentPlayerIndex: 0,
-    status: 'playing',     // 'playing' | 'finished'
+    status: 'playing',
     winnerIndex: null,
-    boardIndex: 0,         // chosen board skin (0,1,2)
+    boardIndex: 0,
+    roundId: null,
+    revision: 0,
   };
 }
 
@@ -291,21 +298,29 @@ export function applyRoll(state, roll) {
  * @returns {{ valid: boolean, error?: string }}
  */
 export function validateState(state) {
-  if (!state || !Array.isArray(state.players)) {
-    return { valid: false, error: 'Missing players array' };
-  }
+  if (!state || !Array.isArray(state.players)) return { valid: false, error: 'Missing players array' };
   if (state.players.length < 2 || state.players.length > 4) {
     return { valid: false, error: `Invalid player count: ${state.players.length}` };
   }
-  for (let i = 0; i < state.players.length; i++) {
+  const slots = new Set();
+  for (let i = 0; i < state.players.length; i += 1) {
     const p = state.players[i];
-    if (typeof p.position !== 'number' || p.position < 0 || p.position > TOTAL) {
-      return { valid: false, error: `Player ${i} has invalid position ${p.position}` };
-    }
+    if (!/^player_[0-3]$/.test(p.slotKey) || slots.has(p.slotKey)) return { valid: false, error: 'Invalid player slot mapping' };
+    slots.add(p.slotKey);
+    if (!Number.isInteger(p.position) || p.position < 0 || p.position > TOTAL) return { valid: false, error: `Player ${i} has invalid position` };
+    if (![0, 6, 12].includes(p.accumulatedSteps)) return { valid: false, error: `Player ${i} has invalid accumulated steps` };
+    if (!Number.isInteger(p.consecutiveSixes) || p.consecutiveSixes < 0 || p.consecutiveSixes > 2) return { valid: false, error: `Player ${i} has invalid six count` };
+    if (typeof p.won !== 'boolean') return { valid: false, error: `Player ${i} has invalid win state` };
   }
-  if (state.currentPlayerIndex < 0 || state.currentPlayerIndex >= state.players.length) {
-    return { valid: false, error: `Invalid currentPlayerIndex ${state.currentPlayerIndex}` };
+  if (!Number.isInteger(state.currentPlayerIndex) || state.currentPlayerIndex < 0 || state.currentPlayerIndex >= state.players.length) {
+    return { valid: false, error: 'Invalid current player' };
   }
+  if (state.status !== 'playing' && state.status !== 'finished') return { valid: false, error: 'Invalid game status' };
+  if (!Number.isInteger(state.boardIndex) || state.boardIndex < 0 || state.boardIndex > 2) return { valid: false, error: 'Invalid board index' };
+  if (state.winnerIndex != null && (!Number.isInteger(state.winnerIndex) || state.winnerIndex < 0 || state.winnerIndex >= state.players.length)) {
+    return { valid: false, error: 'Invalid winner' };
+  }
+  if (state.revision != null && (!Number.isInteger(state.revision) || state.revision < 0)) return { valid: false, error: 'Invalid revision' };
   return { valid: true };
 }
 
@@ -316,25 +331,21 @@ export function validateState(state) {
  * keyed by player_N so Firebase merges work cleanly.
  */
 export function serializeState(state) {
-  const positions = {};
-  const accumulated = {};
-  const consecutive = {};
-  const won = {};
-  state.players.forEach((p, i) => {
-    const key = `player_${i}`;
-    positions[key] = p.position;
-    accumulated[key] = p.accumulatedSteps;
-    consecutive[key] = p.consecutiveSixes;
-    won[key] = p.won;
+  const positions = {}, accumulated = {}, consecutive = {}, won = {};
+  state.players.forEach((player) => {
+    positions[player.slotKey] = player.position;
+    accumulated[player.slotKey] = player.accumulatedSteps;
+    consecutive[player.slotKey] = player.consecutiveSixes;
+    won[player.slotKey] = player.won;
   });
   return {
     positions,
     accumulated,
     consecutive,
     won,
-    currentPlayerIndex: state.currentPlayerIndex,
+    currentPlayerKey: state.players[state.currentPlayerIndex].slotKey,
     status: state.status,
-    winnerIndex: state.winnerIndex != null ? state.winnerIndex : null,
+    winnerKey: state.winnerIndex != null ? state.players[state.winnerIndex].slotKey : null,
     boardIndex: state.boardIndex || 0,
   };
 }
@@ -345,25 +356,34 @@ export function serializeState(state) {
  * @param {object} playersData — Firebase players node (player_N: {name, emoji, ...})
  */
 export function deserializeState(gameData, playersData) {
-  const playerKeys = Object.keys(playersData).sort();
-  const players = playerKeys.map((key, i) => {
-    const pData = playersData[key];
+  const playerKeys = Object.keys(playersData || {}).filter((key) =>
+    /^player_[0-3]$/.test(key) && playersData[key]?.uid
+  ).sort();
+  const players = playerKeys.map((key, index) => {
+    const player = playersData[key];
     return {
-      name: pData.name || `Player ${i + 1}`,
-      emoji: pData.emoji || '😀',
-      color: pData.color || 'red',
-      position: gameData.positions && gameData.positions[key] != null ? gameData.positions[key] : 0,
-      accumulatedSteps: (gameData.accumulated && gameData.accumulated[key]) || 0,
-      consecutiveSixes: (gameData.consecutive && gameData.consecutive[key]) || 0,
-      won: (gameData.won && gameData.won[key]) || false,
-      connected: pData.connected !== false,
+      slotKey: key,
+      name: player.name || `Player ${index + 1}`,
+      emoji: player.emoji || '😀',
+      color: player.color || 'red',
+      position: gameData.positions?.[key] ?? 0,
+      accumulatedSteps: gameData.accumulated?.[key] ?? 0,
+      consecutiveSixes: gameData.consecutive?.[key] ?? 0,
+      won: gameData.won?.[key] ?? false,
+      connected: player.connected !== false,
     };
   });
+  const currentPlayerIndex = players.findIndex((player) => player.slotKey === gameData.currentPlayerKey);
+  const winnerIndex = gameData.winnerKey == null
+    ? null
+    : players.findIndex((player) => player.slotKey === gameData.winnerKey);
   return {
     players,
-    currentPlayerIndex: gameData.currentPlayerIndex || 0,
+    currentPlayerIndex: currentPlayerIndex >= 0 ? currentPlayerIndex : 0,
     status: gameData.status || 'playing',
-    winnerIndex: gameData.winnerIndex != null ? gameData.winnerIndex : null,
-    boardIndex: gameData.boardIndex || 0,
+    winnerIndex: winnerIndex >= 0 ? winnerIndex : null,
+    boardIndex: gameData.boardIndex ?? 0,
+    roundId: gameData.roundId ?? null,
+    revision: gameData.revision ?? 0,
   };
 }

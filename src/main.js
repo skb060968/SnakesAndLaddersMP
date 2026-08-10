@@ -11,12 +11,15 @@ import {
   joinRoom,
   listenRoom,
   setupDisconnectHandler,
+  stopPresenceTracking,
   leavePlayer,
   removePlayer,
   endRoom,
   deleteRoom,
   resetRoom,
-  writeGameState,
+  startGameState,
+  commitMove,
+  setSharedBoardIndex,
   firebaseRetry,
   setPlayerReady,
 } from './firebase-sync.js';
@@ -55,8 +58,8 @@ import {
   pauseBackgroundMusic,
   resumeBackgroundMusic,
 } from './ui.js';
-import { db } from './firebase-config.js';
-import { ref, get, update, onValue, off } from 'firebase/database';
+import { db, auth, authReady } from './firebase-config.js';
+import { ref, get, onValue, off } from 'firebase/database';
 
 /* ======= CONSTANTS ======= */
 
@@ -69,6 +72,7 @@ let roomCode = null;
 let playerIndex = null;
 let isHost = false;
 let playerNames = [];
+let roomPlayers = {};
 let unsubscribeRoom = null;
 let _resultsShown = false;
 
@@ -77,7 +81,7 @@ let _resultsShown = false;
 function saveSession() {
   if (roomCode != null && playerIndex != null) {
     try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ roomCode, playerIndex, isHost }));
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ roomCode, playerIndex }));
     } catch (_) {}
   }
 }
@@ -90,13 +94,18 @@ function loadSession() {
 
 function cleanupAndGoHome() {
   if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
-  stopBackgroundMusic(); // Stop music when leaving game
+  if (window._snlReadyCleanup) window._snlReadyCleanup();
+  stopJoinPreviewListener();
+  stopPresenceTracking();
+  stopBackgroundMusic();
   clearSession();
   roomCode = null;
   playerIndex = null;
   isHost = false;
   playerNames = [];
+  roomPlayers = {};
   state = null;
+  _pendingRemoteUpdate = null;
   _resultsShown = false;
   showScreen('home');
 }
@@ -198,7 +207,6 @@ function wireCreateRoom() {
       isHost = true;
       playerNames = [name];
       saveSession();
-      setupDisconnectHandler(roomCode, playerIndex);
       setupLobby();
     } catch (err) {
       console.error(err);
@@ -270,7 +278,6 @@ function wireJoinRoom() {
       playerIndex = result.playerIndex;
       isHost = false;
       saveSession();
-      setupDisconnectHandler(roomCode, playerIndex);
       stopJoinPreviewListener();
       setupLobby();
     } catch (err) {
@@ -333,13 +340,15 @@ function setupLobby() {
     });
   }
 
-  setupDisconnectHandler(roomCode, playerIndex);
+  setupDisconnectHandler(roomCode, playerIndex)
+    .catch((error) => console.warn('Presence setup failed:', error.message));
   if (unsubscribeRoom) unsubscribeRoom();
 
   unsubscribeRoom = listenRoom(roomCode, {
     onPlayersChange: (players) => {
       // Filter out ghost players (no name) — leftover from stale onDisconnect
       const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
+      roomPlayers = players;
       const arr = keys.map((k) => players[k]);
       playerNames = arr.map((p) => p.name || 'Unknown');
       // Pass both the players array and their keys for rendering
@@ -366,16 +375,11 @@ function setupLobby() {
       if (status === 'lobby') {
         state = null;
         _resultsShown = false;
-        setupLobby();
+        const lobby = document.getElementById('lobby');
+        if (!lobby || lobby.hasAttribute('hidden')) setupLobby();
       }
-      if (status === 'ended') {
-        if (state) {
-          state.status = 'finished';
-          state.winnerIndex = null;
-          renderResults(state);
-          showScreen('results');
-          startReadyListener();
-        }
+      if (status === 'ended' && state?.status === 'finished') {
+        handleWin();
       }
     },
     onGameUpdate: (gameData, lastMove) => {
@@ -454,15 +458,18 @@ function wireLobby() {
       const pd = snap.val();
       // Filter out ghost players before starting game
       const keys = Object.keys(pd).filter((k) => pd[k] && pd[k].name).sort();
+      roomPlayers = pd;
       const infos = keys.map((k) => ({
+        slotKey: k,
         name: pd[k].name || 'Unknown',
         emoji: pd[k].emoji || '😀',
         color: pd[k].color || 'red',
       }));
-      state = createGame(infos);
-      const validation = validateState(state);
+      const candidate = createGame(infos);
+      const validation = validateState(candidate);
       if (!validation.valid) { showToast(`Error: ${validation.error}`); return; }
-      await writeGameState(roomCode, serializeState(state), null);
+      const committed = await startGameState(roomCode, serializeState(candidate));
+      state = deserializeState(committed, roomPlayers);
       startGame();
     } catch (err) {
       console.error(err);
@@ -494,12 +501,14 @@ function wireLobby() {
 /* ======= GAMEPLAY ======= */
 
 let _isAnimating = false;
-let _lastProcessedMoveTimestamp = 0;
+let _lastProcessedRevision = -1;
+let _pendingRemoteUpdate = null;
 
 function startGame() {
   _resultsShown = false;
   _isAnimating = false;
-  _lastProcessedMoveTimestamp = 0;
+  _lastProcessedRevision = state?.revision ?? -1;
+  _pendingRemoteUpdate = null;
   showScreen('gameplay');
   
   // Start background music at 15% volume
@@ -555,13 +564,21 @@ function startGame() {
 async function handleBoardToggle() {
   if (!state || !roomCode) return;
   const next = (getBoardIndex() + 1) % 3;
-  setBoardSkin(next);
-  state = { ...state, boardIndex: next };
-  // Sync to Firebase so others see the change
   try {
-    await update(ref(db, `snl-rooms/${roomCode}/game/boardIndex`), null);
-    await update(ref(db, `snl-rooms/${roomCode}/game`), { boardIndex: next });
-  } catch (_) {}
+    const committed = await setSharedBoardIndex(roomCode, next);
+    state = deserializeState(committed, roomPlayers);
+    setBoardSkin(next);
+    renderUI();
+  } catch (error) {
+    console.error('Board sync failed:', error);
+    showToast('Could not change the board.');
+    setBoardSkin(state.boardIndex || 0);
+  }
+}
+
+function localStateIndex() {
+  const key = playerIndex == null ? null : `player_${playerIndex}`;
+  return state?.players?.findIndex((player) => player.slotKey === key) ?? -1;
 }
 
 function renderUI() {
@@ -570,12 +587,12 @@ function renderUI() {
 
   const cur = state.players[state.currentPlayerIndex];
   setTurn(`${cur?.emoji || ''} ${cur?.name || 'Player'}'s turn`);
-  renderPositions(state, playerIndex);
+  renderPositions(state, localStateIndex());
 
   // Highlight current player's token
   highlightActiveToken(state.currentPlayerIndex);
 
-  const isMyTurn = state.currentPlayerIndex === playerIndex;
+  const isMyTurn = state.currentPlayerIndex === localStateIndex();
   const curColor = cur?.color || 'red';
   setRollButtonState(isMyTurn && !_isAnimating, curColor);
 
@@ -590,7 +607,7 @@ function renderUI() {
 
 async function handleRoll() {
   if (!state || state.status !== 'playing') return;
-  if (state.currentPlayerIndex !== playerIndex) return;
+  if (state.currentPlayerIndex !== localStateIndex()) return;
   if (_isAnimating) return;
 
   _isAnimating = true;
@@ -613,33 +630,35 @@ async function handleRoll() {
 
   const { outcome, state: newState } = result;
   const moveTimestamp = Date.now();
-
-  // Build a single lastMove descriptor that contains everything opponents
-  // need to replay this turn's animations.
+  const roller = state.players[outcome.by];
+  const captured = outcome.capturedPlayer != null ? state.players[outcome.capturedPlayer] : null;
   const lastMove = {
     roller: outcome.by,
+    rollerKey: roller.slotKey,
     roll: outcome.roll,
     kind: outcome.kind,
     steps: outcome.steps || 0,
-    landing: outcome.landing != null ? outcome.landing : null,
-    snakeLadderTo: outcome.snakeLadderTo != null ? outcome.snakeLadderTo : null,
-    capturedPlayer: outcome.capturedPlayer != null ? outcome.capturedPlayer : null,
-    win: !!outcome.win,
+    landing: outcome.landing,
+    snakeLadderTo: outcome.snakeLadderTo,
+    capturedPlayer: outcome.capturedPlayer,
+    capturedPlayerKey: captured?.slotKey,
+    win: Boolean(outcome.win),
     timestamp: moveTimestamp,
   };
 
-  // Mark this timestamp processed BEFORE writing — so the listener echo
-  // for our own move is recognized and doesn't replay the animation locally.
-  _lastProcessedMoveTimestamp = moveTimestamp;
-
-  // Single write: authoritative new state + lastMove descriptor.
+  let authoritativeState;
   try {
-    await writeGameState(roomCode, serializeState(newState), lastMove);
+    const committed = await commitMove(roomCode, state.revision, serializeState(newState), lastMove);
+    authoritativeState = deserializeState(committed, roomPlayers);
+    const validation = validateState(authoritativeState);
+    if (!validation.valid) throw new Error(validation.error);
+    _lastProcessedRevision = committed.revision;
   } catch (err) {
-    console.error('writeGameState failed:', err);
-    showToast('Sync failed. Try again.');
+    console.error('commitMove failed:', err);
+    showToast(err.message || 'Sync failed. Try again.');
     _isAnimating = false;
     renderUI();
+    drainPendingRemoteUpdate();
     return;
   }
 
@@ -651,8 +670,9 @@ async function handleRoll() {
   // Drive animations based on outcome kind
   await runOutcomeAnimation(outcome);
 
-  // Update local state to the new state
-  state = newState;
+  // Adopt the transaction result, including its authoritative revision.
+  state = authoritativeState;
+  placeTokens(state.players.map((player) => player.position));
 
   if (state.status === 'finished') {
     handleWin();
@@ -662,6 +682,7 @@ async function handleRoll() {
 
   _isAnimating = false;
   renderUI();
+  drainPendingRemoteUpdate();
 }
 
 /**
@@ -752,110 +773,101 @@ async function runOutcomeAnimation(outcome) {
 
 /* ======= REMOTE UPDATES ======= */
 
+function queueRemoteUpdate(gameData, lastMove) {
+  const revision = Number(gameData?.revision ?? -1);
+  if (!_pendingRemoteUpdate || revision > Number(_pendingRemoteUpdate.gameData?.revision ?? -1)) {
+    _pendingRemoteUpdate = { gameData, lastMove };
+  }
+}
+
+function drainPendingRemoteUpdate() {
+  if (_isAnimating || !_pendingRemoteUpdate) return;
+  const pending = _pendingRemoteUpdate;
+  _pendingRemoteUpdate = null;
+  queueMicrotask(() => handleRemoteUpdate(pending.gameData, pending.lastMove));
+}
+
 async function handleRemoteUpdate(gameData, lastMove) {
-  if (!gameData || !roomCode) return;
-  if (_resultsShown) return;
-  if (_isAnimating) return;
+  if (!gameData || !roomCode || _resultsShown) return;
+  const gameplay = document.getElementById('gameplay');
+  if (!gameplay || gameplay.hasAttribute('hidden')) return;
 
-  // Don't process gameplay updates until our gameplay screen is initialized
-  // (startGame() must have run to create tokens and grid).
-  const gameplayEl = document.getElementById('gameplay');
-  if (!gameplayEl || gameplayEl.hasAttribute('hidden')) {
+  let newState;
+  try {
+    newState = deserializeState(gameData, roomPlayers);
+    const validation = validateState(newState);
+    if (!validation.valid) throw new Error(validation.error);
+  } catch (error) {
+    console.error('Rejected invalid remote state:', error);
+    showToast('Received invalid game data. Reconnecting…');
     return;
   }
 
-  // Skip echoes of our own moves — we already animated locally
-  if (lastMove && lastMove.timestamp === _lastProcessedMoveTimestamp) {
-    // Local state already current, just refresh authoritative state from Firebase
-    const playersData = buildPlayersData();
-    state = deserializeState(gameData, playersData);
-    if (state.status === 'finished') {
-      handleWin();
-    } else {
-      renderUI();
-    }
+  if (state && newState.roundId === state.roundId && newState.revision <= state.revision) return;
+  if (_isAnimating) { queueRemoteUpdate(gameData, lastMove); return; }
+
+  const isNewRound = state && newState.roundId !== state.roundId;
+  const revisionGap = state && !isNewRound && newState.revision > state.revision + 1;
+  const moveIsCurrent = lastMove && lastMove.revision === newState.revision;
+  const localKey = playerIndex == null ? null : `player_${playerIndex}`;
+  const remoteRoller = moveIsCurrent && lastMove.rollerKey !== localKey;
+
+  if (!state || isNewRound || revisionGap || !remoteRoller) {
+    state = newState;
+    _lastProcessedRevision = Math.max(_lastProcessedRevision, newState.revision);
+    if (state.boardIndex !== getBoardIndex()) setBoardSkin(state.boardIndex);
+    placeTokens(state.players.map((player) => player.position));
+    if (state.status === 'finished') handleWin();
+    else renderUI();
     return;
   }
 
-  const playersData = buildPlayersData();
-  const newState = deserializeState(gameData, playersData);
-
-  // Detect a remote move via lastMove descriptor
-  if (lastMove && lastMove.roller != null && lastMove.roller !== playerIndex) {
-    _isAnimating = true;
-    _lastProcessedMoveTimestamp = lastMove.timestamp || 0;
-
-    try {
-      // Local positions snapshot for animation
-      const positions = state ? state.players.map((p) => p.position) : newState.players.map((p) => p.position);
-
-      // Dice phase
-      setMessage(`${state?.players[lastMove.roller]?.name || 'Opponent'} rolled ${lastMove.roll}`);
-      playSound('roll');
-      throwDiceVisual(lastMove.roll);
-      await new Promise((r) => setTimeout(r, 1150));
-
-      // Animate based on kind
-      await runOutcomeAnimation({
-        kind: lastMove.kind,
-        by: lastMove.roller,
-        roll: lastMove.roll,
-        steps: lastMove.steps,
-        landing: lastMove.landing,
-        snakeLadderTo: lastMove.snakeLadderTo,
-        win: lastMove.win,
-      });
-
-      state = newState;
-      _isAnimating = false;
-
-      if (state.status === 'finished') {
-        handleWin();
-        return;
-      }
-      renderUI();
-    } catch (err) {
-      console.error('Remote animation error:', err);
-      // Recover: jump straight to the new state without animation
-      state = newState;
-      _isAnimating = false;
-      if (state.status === 'finished') {
-        handleWin();
-        return;
-      }
-      placeTokens(state.players.map((p) => p.position));
-      renderUI();
-    } finally {
-      _isAnimating = false;
-    }
+  const rollerIndex = state.players.findIndex((player) => player.slotKey === lastMove.rollerKey);
+  if (rollerIndex < 0) {
+    state = newState;
+    placeTokens(state.players.map((player) => player.position));
+    renderUI();
     return;
   }
+  const capturedIndex = lastMove.capturedPlayerKey
+    ? state.players.findIndex((player) => player.slotKey === lastMove.capturedPlayerKey)
+    : null;
 
-  // Generic update (e.g. board skin change, lobby->game start sync)
-  state = newState;
-
-  // Sync board skin if it differs from local
-  if (state.boardIndex != null && state.boardIndex !== getBoardIndex()) {
-    setBoardSkin(state.boardIndex);
+  _isAnimating = true;
+  _lastProcessedRevision = newState.revision;
+  try {
+    setMessage(`${state.players[rollerIndex]?.name || 'Opponent'} rolled ${lastMove.roll}`);
+    playSound('roll');
+    throwDiceVisual(lastMove.roll);
+    await new Promise((resolve) => setTimeout(resolve, 1150));
+    await runOutcomeAnimation({
+      kind: lastMove.kind,
+      by: rollerIndex,
+      roll: lastMove.roll,
+      steps: lastMove.steps,
+      landing: lastMove.landing,
+      snakeLadderTo: lastMove.snakeLadderTo,
+      capturedPlayer: capturedIndex >= 0 ? capturedIndex : null,
+      win: lastMove.win,
+    });
+    state = newState;
+    placeTokens(state.players.map((player) => player.position));
+    if (state.status === 'finished') handleWin();
+    else renderUI();
+  } catch (error) {
+    console.error('Remote animation error:', error);
+    state = newState;
+    placeTokens(state.players.map((player) => player.position));
+    if (state.status === 'finished') handleWin();
+    else renderUI();
+  } finally {
+    _isAnimating = false;
+    drainPendingRemoteUpdate();
   }
-
-  if (state.status === 'finished') {
-    handleWin();
-    return;
-  }
-  renderUI();
 }
 
 function buildPlayersData() {
-  const playersData = {};
-  playerNames.forEach((name, i) => {
-    playersData[`player_${i}`] = {
-      name,
-      emoji: state ? state.players[i]?.emoji || '😀' : '😀',
-      color: state ? state.players[i]?.color || 'red' : 'red',
-    };
-  });
-  return playersData;
+  return roomPlayers;
 }
 
 /* ======= WIN / RESULTS ======= */
@@ -924,7 +936,7 @@ function renderResults(s) {
         li.style.borderLeft = '4px solid #ffd700';
       }
       const nameSpan = document.createElement('span');
-      const meTag = i === playerIndex ? ' (you)' : '';
+      const meTag = p.slotKey === `player_${playerIndex}` ? ' (you)' : '';
       const trophy = i === s.winnerIndex ? '🏆 ' : '';
       nameSpan.textContent = `${trophy}${p.emoji} ${p.name}${meTag}`;
       const posSpan = document.createElement('span');
@@ -944,13 +956,15 @@ function wireEndGame() {
   const btn = document.getElementById('btn-end-game');
   if (!btn) return;
   btn.addEventListener('click', async () => {
-    if (!state) return;
-    state.status = 'finished';
-    state.winnerIndex = null;
-    if (roomCode) { try { await endRoom(roomCode); } catch (_) {} }
-    renderResults(state);
-    showScreen('results');
-    startReadyListener();
+    if (!state || !isHost) return;
+    try {
+      const committed = await endRoom(roomCode);
+      state = deserializeState(committed, roomPlayers);
+      handleWin();
+    } catch (error) {
+      console.error('End round failed:', error);
+      showToast('Failed to end the round.');
+    }
   });
 }
 
@@ -1017,39 +1031,31 @@ function startReadyListener() {
   }
   if (window._snlReadyCleanup) window._snlReadyCleanup();
   const readyRef = ref(db, `snl-rooms/${roomCode}/ready`);
-  const handler = (snap) => {
-    const data = snap.val() || {};
-    const ready = Object.keys(data).filter((k) => data[k] === true)
-      .map((k) => parseInt(k.replace('player_', ''), 10))
-      .filter((n) => !isNaN(n));
-    const left = Object.keys(data).filter((k) => data[k] === 'left')
-      .map((k) => parseInt(k.replace('player_', ''), 10))
-      .filter((n) => !isNaN(n));
-    renderReadyIndicators(playerNames, ready, left);
-  };
+  const handler = (snapshot) => renderReadyIndicators(roomPlayers, snapshot.val() || {});
   onValue(readyRef, handler);
-  window._snlReadyCleanup = () => { off(readyRef, 'value', handler); window._snlReadyCleanup = null; };
+  window._snlReadyCleanup = () => {
+    off(readyRef, 'value', handler);
+    window._snlReadyCleanup = null;
+  };
 }
 
-function renderReadyIndicators(names, readyArr, leftArr) {
+function renderReadyIndicators(players, readyState) {
   const container = document.getElementById('ready-indicators');
   if (!container) return;
-  container.hidden = false;
+  const entries = Object.entries(players || {}).filter(([, player]) => player?.name);
+  container.hidden = entries.length === 0;
   container.innerHTML = '';
-  const readySet = new Set(readyArr);
-  const leftSet = new Set(leftArr);
-  names.forEach((name, i) => {
+  entries.forEach(([key, player]) => {
     const dot = document.createElement('div');
     dot.className = 'ready-dot';
-    if (readySet.has(i)) dot.classList.add('ready');
-    if (leftSet.has(i)) dot.classList.add('not-ready');
+    if (readyState[key] === true) dot.classList.add('ready');
+    if (readyState[key] === 'left') dot.classList.add('not-ready');
     const circle = document.createElement('div');
     circle.className = 'dot';
     const label = document.createElement('span');
     label.className = 'dot-name';
-    label.textContent = name;
-    dot.appendChild(circle);
-    dot.appendChild(label);
+    label.textContent = player.name;
+    dot.append(circle, label);
     container.appendChild(dot);
   });
 }
@@ -1058,56 +1064,47 @@ function renderReadyIndicators(names, readyArr, leftArr) {
 
 async function checkSession() {
   const session = loadSession();
-  if (!session) return false;
+  if (!session?.roomCode || !Number.isInteger(session.playerIndex)) return false;
   try {
     const snap = await firebaseRetry(() => get(ref(db, `snl-rooms/${session.roomCode}`)));
     if (!snap.exists()) { clearSession(); return false; }
-    const d = snap.val();
-    const status = d.meta?.status;
-    if (status === 'ended') { clearSession(); return false; }
+    const room = snap.val();
+    if (room.schemaVersion !== 2) { clearSession(); return false; }
+    const key = `player_${session.playerIndex}`;
+    const player = room.players?.[key];
+    if (!player || player.uid !== auth.currentUser?.uid) {
+      clearSession();
+      return false;
+    }
 
     roomCode = session.roomCode;
     playerIndex = session.playerIndex;
-    isHost = session.isHost;
-    if (d.players) {
-      // Filter out ghost players on session restore
-      const keys = Object.keys(d.players).filter((k) => d.players[k] && d.players[k].name).sort();
-      playerNames = keys.map((k) => d.players[k].name || 'Unknown');
-    }
-    try { await update(ref(db, `snl-rooms/${roomCode}/players/player_${playerIndex}`), { connected: true }); } catch (_) {}
+    isHost = room.meta?.hostUid === auth.currentUser.uid && key === 'player_0';
+    roomPlayers = room.players || {};
+    playerNames = Object.keys(roomPlayers).sort().map((slot) => roomPlayers[slot]?.name).filter(Boolean);
+    await setupDisconnectHandler(roomCode, playerIndex);
 
-    if (status === 'lobby') { setupLobby(); return true; }
-    if (status === 'active' && d.game) {
-      state = deserializeState(d.game, d.players);
-      setupDisconnectHandler(roomCode, playerIndex);
-      if (unsubscribeRoom) unsubscribeRoom();
-      unsubscribeRoom = listenRoom(roomCode, {
-        onPlayersChange: (players) => {
-          // Filter out ghost players
-          const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
-          playerNames = keys.map((k) => players[k].name || 'Unknown');
-        },
-        onStatusChange: async (s) => {
-          if (s === 'lobby') { state = null; _resultsShown = false; setupLobby(); }
-          if (s === 'ended' && state) {
-            state.status = 'finished';
-            state.winnerIndex = null;
-            renderResults(state);
-            showScreen('results');
-            startReadyListener();
-          }
-        },
-        onGameUpdate: (gd, lm) => { handleRemoteUpdate(gd, lm); },
-        onRoomDeleted: () => { showToast('Host has left. Room closed.', 3000); cleanupAndGoHome(); },
-      });
-      startGame();
+    const effectiveStatus = room.game?.status === 'finished'
+      ? 'ended'
+      : room.game?.status === 'playing' ? 'active' : room.meta?.status;
+    if (effectiveStatus === 'lobby') {
+      setupLobby();
+      return true;
+    }
+    if ((effectiveStatus === 'active' || effectiveStatus === 'ended') && room.game) {
+      state = deserializeState(room.game, roomPlayers);
+      const validation = validateState(state);
+      if (!validation.valid) throw new Error(validation.error);
+      setupLobby();
+      if (effectiveStatus === 'active') startGame();
+      else handleWin();
       return true;
     }
     clearSession();
     return false;
-  } catch (err) {
-    console.warn('Session restore failed:', err.message);
-    clearSession();
+  } catch (error) {
+    console.warn('Session restore failed:', error.message);
+    showToast('Could not restore the saved game. Check your connection and retry.');
     return false;
   }
 }
@@ -1144,67 +1141,51 @@ if (window.visualViewport) {
 
 /* ======= SERVICE WORKER ======= */
 
-// Update notification functions
+let waitingWorker = null;
+let updateAccepted = false;
+
 window.reloadForUpdate = function() {
-  window.location.reload();
+  if (!waitingWorker) {
+    window.location.reload();
+    return;
+  }
+  updateAccepted = true;
+  waitingWorker.postMessage({ type: 'SKIP_WAITING' });
 };
 
 window.dismissUpdate = function() {
-  document.getElementById('updateToast').style.display = 'none';
+  const toast = document.getElementById('updateToast');
+  if (toast) toast.style.display = 'none';
 };
 
-function showUpdateToast() {
+function showUpdateToast(worker) {
+  waitingWorker = worker || waitingWorker;
   const toast = document.getElementById('updateToast');
   if (!toast) return;
   toast.style.display = 'block';
   toast.style.animation = 'slideUp 0.4s ease-out';
 }
 
-// Register Service Worker for PWA with update detection
 if ('serviceWorker' in navigator) {
-  let refreshing = false;
-  
-  // Detect controller change and reload
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (refreshing) return;
-    refreshing = true;
-    console.log('[App] Controller changed, reloading...');
+    if (updateAccepted) window.location.reload();
   });
-  
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then((registration) => {
-        console.log('✅ Service Worker registered:', registration);
-        
-        // Check for updates periodically (every 5 minutes)
-        setInterval(() => {
-          registration.update();
-        }, 5 * 60 * 1000);
-        
-        // Listen for waiting service worker
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          console.log('[App] New service worker found');
-          
-          newWorker.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              console.log('[App] New service worker installed, update available');
-              showUpdateToast();
-            }
-          });
-        });
-      })
-      .catch((error) => {
-        console.log('❌ Service Worker registration failed:', error);
-      });
-    
-    // Listen for messages from service worker
-    navigator.serviceWorker.addEventListener('message', (event) => {
-      if (event.data && event.data.type === 'UPDATE_AVAILABLE') {
-        console.log(`[App] Update available: ${event.data.version}`);
-        showUpdateToast();
+    navigator.serviceWorker.register('/sw.js').then((registration) => {
+      if (registration.waiting && navigator.serviceWorker.controller) {
+        showUpdateToast(registration.waiting);
       }
-    });
+      setInterval(() => registration.update(), 5 * 60 * 1000);
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        worker?.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            showUpdateToast(worker);
+          }
+        });
+      });
+    }).catch((error) => console.warn('Service worker registration failed:', error));
   });
 }
 
@@ -1334,31 +1315,37 @@ async function init() {
   wireColorPicker('.create-color-picker');
   wireColorPicker('.join-color-picker');
 
-  // Initialize deep link handler - handles URL room codes automatically
+  try {
+    await authReady;
+  } catch (error) {
+    console.error('Authentication failed:', error);
+    showToast('Unable to connect securely. Check your internet connection.');
+    showScreen('home');
+    return;
+  }
+
+  const linkedCode = new URL(location.href).searchParams.get('room')?.toUpperCase() || null;
+  const saved = loadSession();
+  if (linkedCode && saved?.roomCode === linkedCode) {
+    history.replaceState({}, '', location.pathname);
+    if (await checkSession()) return;
+  }
+
   const urlRoomCode = initDeepLinkHandler({
     roomInputId: 'room-code-input',
     joinScreenId: 'join-room',
     gameName: 'Snakes & Ladders MP',
-    showScreenFn: showScreen
+    showScreenFn: showScreen,
   });
-  
-  // If deep link handled the room code, trigger the preview listener
-  // to dim already-taken colors in real time
   if (urlRoomCode) {
-    // Give the DOM a moment to settle after screen change
     setTimeout(() => {
-      const codeInput = document.getElementById('room-code-input');
-      if (codeInput && codeInput.value.length === 4) {
-        // Manually trigger input event to start the preview listener
-        codeInput.dispatchEvent(new Event('input', { bubbles: true }));
-      }
+      const input = document.getElementById('room-code-input');
+      if (input && input.value.length === 4) input.dispatchEvent(new Event('input', { bubbles: true }));
     }, 100);
     return;
   }
 
-  // Try restoring an existing session before showing the home screen
-  const restored = await checkSession();
-  if (!restored) showScreen('home');
+  if (!await checkSession()) showScreen('home');
 }
 
 init();

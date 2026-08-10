@@ -53,55 +53,52 @@ try {
 /* ======= BACKGROUND MUSIC ======= */
 
 let backgroundMusic = null;
+let backgroundMusicWanted = false;
+let backgroundMusicVolume = 0.10;
 
 function pauseBackgroundMusic() {
-  if (backgroundMusic) {
-    try {
-      backgroundMusic.pause();
-    } catch (_) {}
-  }
+  try { backgroundMusic?.pause(); } catch (_) {}
 }
 
 function resumeBackgroundMusic() {
-  if (backgroundMusic && backgroundMusic.paused && !_muted) {
-    try {
-      backgroundMusic.play().catch(() => {});
-    } catch (_) {}
+  if (!backgroundMusicWanted || _muted) return;
+  if (!backgroundMusic) {
+    startBackgroundMusic();
+    return;
   }
+  if (backgroundMusic.paused) backgroundMusic.play().catch(() => {});
 }
 
 export function startBackgroundMusic() {
+  backgroundMusicWanted = true;
   if (_muted) return;
-  if (backgroundMusic) return; // Already playing
-  
+  if (backgroundMusic) {
+    backgroundMusic.play().catch(() => {});
+    return;
+  }
   try {
     backgroundMusic = new Audio(soundFiles.music);
     backgroundMusic.loop = true;
-    backgroundMusic.volume = 0.10; // 10% volume
-    backgroundMusic.play().catch(() => {
-      backgroundMusic = null;
-    });
+    backgroundMusic.volume = backgroundMusicVolume;
+    backgroundMusic.play().catch(() => {});
   } catch (_) {
     backgroundMusic = null;
   }
 }
 
 export function stopBackgroundMusic() {
-  if (backgroundMusic) {
-    try {
-      backgroundMusic.pause();
-      backgroundMusic.currentTime = 0;
-      backgroundMusic = null;
-    } catch (_) {}
-  }
+  backgroundMusicWanted = false;
+  if (!backgroundMusic) return;
+  try {
+    backgroundMusic.pause();
+    backgroundMusic.currentTime = 0;
+  } catch (_) {}
+  backgroundMusic = null;
 }
 
 export function setBackgroundMusicVolume(volume) {
-  if (backgroundMusic) {
-    try {
-      backgroundMusic.volume = Math.max(0, Math.min(1, volume));
-    } catch (_) {}
-  }
+  backgroundMusicVolume = Math.max(0, Math.min(1, volume));
+  if (backgroundMusic) backgroundMusic.volume = backgroundMusicVolume;
 }
 
 export { pauseBackgroundMusic, resumeBackgroundMusic };
@@ -133,6 +130,7 @@ function unlockAudio() {
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') audioCtx.resume();
+    resumeBackgroundMusic();
     Object.entries(soundFiles).forEach(([name, url]) => {
       fetch(url)
         .then((r) => r.arrayBuffer())
@@ -147,6 +145,10 @@ function unlockAudio() {
 
 ['click', 'touchstart', 'keydown'].forEach((evt) => {
   document.addEventListener(evt, unlockAudio, { once: true });
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') pauseBackgroundMusic();
+  else resumeBackgroundMusic();
 });
 
 export function playSound(name) {

@@ -1,6 +1,12 @@
-import { initializeApp } from "firebase/app";
-import { getDatabase } from "firebase/database";
-import { getAuth, signInAnonymously } from "firebase/auth";
+import { initializeApp } from 'firebase/app';
+import { getDatabase } from 'firebase/database';
+import {
+  browserLocalPersistence,
+  getAuth,
+  onAuthStateChanged,
+  setPersistence,
+  signInAnonymously,
+} from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -14,6 +20,30 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const db = getDatabase(app);
-
 export const auth = getAuth(app);
-signInAnonymously(auth).catch((err) => console.error("Auth error:", err));
+
+/** Restores the durable anonymous identity before creating a new one. */
+export const authReady = new Promise((resolve, reject) => {
+  let unsubscribe = () => {};
+  let signInStarted = false;
+  const timeout = setTimeout(() => {
+    unsubscribe();
+    reject(new Error('Authentication timed out. Check your connection and reload.'));
+  }, 15000);
+  const finish = (fn, value) => {
+    clearTimeout(timeout);
+    unsubscribe();
+    fn(value);
+  };
+
+  setPersistence(auth, browserLocalPersistence).then(() => {
+    unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user?.uid) {
+        finish(resolve, user);
+      } else if (!signInStarted) {
+        signInStarted = true;
+        signInAnonymously(auth).catch((error) => finish(reject, error));
+      }
+    }, (error) => finish(reject, error));
+  }).catch((error) => finish(reject, error));
+});
