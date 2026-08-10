@@ -1140,13 +1140,46 @@ if (window.visualViewport) {
 let waitingWorker = null;
 let updateAccepted = false;
 
+function setUpdateToastProgress(isUpdating, message = null) {
+  const toast = document.getElementById('updateToast');
+  const reloadButton = document.getElementById('updateToastReload');
+  const laterButton = document.getElementById('updateToastLater');
+  const messageElement = document.getElementById('updateToastMessage');
+  if (reloadButton) {
+    reloadButton.disabled = isUpdating;
+    reloadButton.textContent = isUpdating ? 'Updating…' : 'Reload Now';
+    reloadButton.style.cursor = isUpdating ? 'wait' : 'pointer';
+    reloadButton.style.opacity = isUpdating ? '0.7' : '1';
+    reloadButton.toggleAttribute('aria-busy', isUpdating);
+  }
+  if (laterButton) {
+    laterButton.disabled = isUpdating;
+    laterButton.style.cursor = isUpdating ? 'wait' : 'pointer';
+    laterButton.style.opacity = isUpdating ? '0.7' : '1';
+  }
+  if (messageElement) messageElement.textContent = message || (isUpdating
+    ? 'Applying update… The app will reload automatically.'
+    : 'Refresh to get the latest version');
+  if (toast) toast.toggleAttribute('aria-busy', isUpdating);
+}
+
 window.reloadForUpdate = function() {
+  if (updateAccepted) return;
+  updateAccepted = true;
+  setUpdateToastProgress(true);
   if (!waitingWorker) {
-    window.location.reload();
+    requestAnimationFrame(() => requestAnimationFrame(() => window.location.reload()));
     return;
   }
-  updateAccepted = true;
-  waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  try {
+    waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  } catch (error) {
+    updateAccepted = false;
+    setUpdateToastProgress(false, 'Update could not start. Please try again.');
+    const reloadButton = document.getElementById('updateToastReload');
+    if (reloadButton) reloadButton.textContent = 'Try again';
+    console.warn('Could not activate the update:', error);
+  }
 };
 
 window.dismissUpdate = function() {
