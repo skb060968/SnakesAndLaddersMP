@@ -1,5 +1,5 @@
 /* Snakes & Ladders MP service worker — deliberate updates and safe fallbacks. */
-const CACHE_NAME = 'snl-mp-v37';
+const CACHE_NAME = 'snl-mp-v38';
 const STATIC_ASSETS = [
   '/', '/index.html', '/manifest.json',
   '/images/board.png', '/images/board1.png', '/images/board2.png',
@@ -49,6 +49,9 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
 
   const navigation = event.request.mode === 'navigate';
+  // Never intercept/cache API calls (e.g. the LiveKit token endpoint).
+  if (url.pathname.startsWith('/api/')) return;
+
   const dynamicAsset = navigation || url.pathname.endsWith('.js') ||
     url.pathname.endsWith('.css') || url.pathname.startsWith('/assets/');
   if (dynamicAsset) {

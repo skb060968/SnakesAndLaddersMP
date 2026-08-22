@@ -56,9 +56,11 @@ import {
   stopBackgroundMusic,
   pauseBackgroundMusic,
   resumeBackgroundMusic,
+  setActiveSpeakers,
 } from './ui.js';
 import { db, auth, authReady } from './firebase-config.js';
 import { ref, get, onValue, off } from 'firebase/database';
+import { createLiveKitVoice } from './voice-livekit.js';
 
 /* ======= CONSTANTS ======= */
 
@@ -74,6 +76,8 @@ let playerNames = [];
 let roomPlayers = {};
 let unsubscribeRoom = null;
 let _resultsShown = false;
+let voiceChat = null;
+let voiceBusy = false;
 
 /* ======= SESSION PERSISTENCE ======= */
 
@@ -91,9 +95,82 @@ function loadSession() {
   try { const r = localStorage.getItem(SESSION_KEY); return r ? JSON.parse(r) : null; } catch (_) { return null; }
 }
 
+/* ======= VOICE CHAT (optional, LiveKit, voice-only) ======= */
+
+function updateVoiceUI(status) {
+  const toggle = document.getElementById('voice-toggle');
+  const muteBtn = document.getElementById('voice-mute');
+  if (!toggle || !muteBtn) return;
+  const state = status?.state || 'idle';
+  const joined = Boolean(status?.joined);
+
+  toggle.setAttribute('aria-pressed', String(joined));
+  toggle.classList.toggle('active', joined);
+  muteBtn.hidden = !joined;
+
+  if (!joined) toggle.textContent = '🎙️ Voice';
+  else if (state === 'connected') toggle.textContent = '🎧 Leave';
+  else if (state === 'connecting') toggle.textContent = '🎙️ …';
+  else toggle.textContent = '🎧 Leave';
+
+  const muted = Boolean(status?.muted);
+  muteBtn.textContent = muted ? '🔇' : '🎤';
+  muteBtn.setAttribute('aria-label', muted ? 'Unmute microphone' : 'Mute microphone');
+  muteBtn.classList.toggle('muted', muted);
+
+  if (state === 'needs-audio-unlock') showToast('Tap 🎤 to enable voice audio', 3000);
+}
+
+function ensureVoiceChat() {
+  if (voiceChat || roomCode == null || playerIndex == null) return voiceChat;
+  voiceChat = createLiveKitVoice({
+    roomCode,
+    identity: `player_${playerIndex}`,
+    displayName: playerNames[playerIndex] || `Player ${playerIndex + 1}`,
+    getIdToken: async () => {
+      const user = await authReady;
+      return user.getIdToken();
+    },
+    onStatus: (status) => {
+      updateVoiceUI(status);
+      if (status.state === 'error' && status.message) showToast(status.message);
+    },
+    onSpeakers: (identities) => setActiveSpeakers(identities),
+  });
+  return voiceChat;
+}
+
+async function handleVoiceToggle() {
+  if (voiceBusy) return;
+  voiceBusy = true;
+  const toggle = document.getElementById('voice-toggle');
+  if (toggle) toggle.disabled = true;
+  try {
+    const chat = ensureVoiceChat();
+    if (!chat) return;
+    if (chat.isJoined()) await chat.leave();
+    else await chat.join();
+  } catch (error) {
+    console.error('Voice toggle failed:', error);
+    showToast('Voice unavailable — try again.');
+  } finally {
+    voiceBusy = false;
+    if (toggle) toggle.disabled = false;
+  }
+}
+
+function stopVoiceChat() {
+  if (!voiceChat) return;
+  try { voiceChat.destroy(); } catch (_) {}
+  voiceChat = null;
+  setActiveSpeakers([]);
+  updateVoiceUI({ state: 'idle', joined: false, muted: false });
+}
+
 function cleanupAndGoHome() {
   if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
   if (window._snlReadyCleanup) window._snlReadyCleanup();
+  stopVoiceChat();
   stopJoinPreviewListener();
   stopPresenceTracking();
   stopBackgroundMusic();
@@ -560,6 +637,19 @@ function startGame() {
     boardBtn._wired = true;
     boardBtn.addEventListener('click', handleBoardToggle);
   }
+
+  // Wire voice controls (idempotent)
+  const voiceBtn = document.getElementById('voice-toggle');
+  if (voiceBtn && !voiceBtn._wired) {
+    voiceBtn._wired = true;
+    voiceBtn.addEventListener('click', handleVoiceToggle);
+  }
+  const voiceMuteBtn = document.getElementById('voice-mute');
+  if (voiceMuteBtn && !voiceMuteBtn._wired) {
+    voiceMuteBtn._wired = true;
+    voiceMuteBtn.addEventListener('click', () => { if (voiceChat?.isJoined()) voiceChat.toggleMute(); });
+  }
+  updateVoiceUI({ state: voiceChat?.isJoined() ? 'connected' : 'idle', joined: Boolean(voiceChat?.isJoined()), muted: Boolean(voiceChat?.isMuted?.()) });
 
   resetDice();
   renderUI();

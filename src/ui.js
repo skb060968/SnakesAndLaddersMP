@@ -577,16 +577,42 @@ export function renderPositions(state, localIdx) {
   state.players.forEach((p, i) => {
     const row = document.createElement('div');
     row.className = 'player-row';
+    if (p.slotKey) row.dataset.slot = p.slotKey;
     const isMe = i === localIdx;
     const isCurrent = i === state.currentPlayerIndex;
     const dot = colorDots[p.color] || '⚪';
     const meTag = isMe ? ' (you)' : '';
-    row.textContent = `${dot} ${p.emoji} ${p.name}${meTag}: ${p.position}`;
+    const label = document.createElement('span');
+    label.className = 'player-row-label';
+    label.textContent = `${dot} ${p.emoji} ${p.name}${meTag}: ${p.position}`;
+    const speaker = document.createElement('span');
+    speaker.className = 'speaker-indicator';
+    speaker.setAttribute('aria-hidden', 'true');
+    speaker.textContent = '🎙️';
+    row.append(label, speaker);
     if (isCurrent) {
       row.style.color = '#ffd700';
       row.style.fontWeight = '900';
     }
     el.appendChild(row);
+  });
+  // Re-apply any active-speaker highlight after a re-render.
+  if (typeof window !== 'undefined' && window._snlActiveSpeakers) {
+    setActiveSpeakers(window._snlActiveSpeakers);
+  }
+}
+
+/**
+ * Adds a glowing mic emoji to the player rows whose slot keys are currently
+ * speaking. Keyed by slot (player_0..3), not row order.
+ * @param {string[]} slotKeys
+ */
+export function setActiveSpeakers(slotKeys = []) {
+  const active = new Set(slotKeys);
+  if (typeof window !== 'undefined') window._snlActiveSpeakers = slotKeys;
+  document.querySelectorAll('#positions .player-row').forEach((row) => {
+    const on = active.has(row.dataset.slot);
+    row.classList.toggle('speaking', on);
   });
 }
 

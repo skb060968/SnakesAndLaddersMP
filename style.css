@@ -685,15 +685,80 @@ body {
   justify-content: center;
 }
 
-/* Make the Change Board button take main space; mute and end-game stay compact. */
+/* Compact controls row: board button shrinks to its text so the voice control
+   fits alongside the mute and end-game buttons. */
 .bottom-row .btn {
   max-width: none;
   flex: 1 1 0;
 }
 
+.bottom-row .btn.compact-board {
+  flex: 0 1 auto;
+  padding-left: 12px;
+  padding-right: 12px;
+  white-space: nowrap;
+}
+
 .bottom-row .mute-toggle,
-.bottom-row .btn-end-game {
+.bottom-row .btn-end-game,
+.bottom-row .voice-toggle,
+.bottom-row .voice-mute {
   flex: 0 0 auto;
+}
+
+.voice-toggle {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: #fff;
+  color: #14213d;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.voice-toggle.active {
+  background: #16a34a;
+  color: #fff;
+}
+
+.voice-mute {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  color: #14213d;
+  font-size: 1.05rem;
+  cursor: pointer;
+}
+
+.voice-mute.muted {
+  background: #f59e0b;
+  color: #451a03;
+}
+
+.voice-mute[hidden] {
+  display: none !important;
+}
+
+/* Active-speaker indicator on player rows (glowing mic, keyed by slot). */
+.player-row .speaker-indicator {
+  margin-left: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.player-row.speaking .speaker-indicator {
+  opacity: 1;
+  animation: speaker-glow 1s ease-in-out infinite;
+}
+
+@keyframes speaker-glow {
+  50% {
+    filter: drop-shadow(0 0 4px #4ade80);
+  }
 }
 
 .mute-toggle {
