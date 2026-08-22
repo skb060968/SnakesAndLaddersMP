@@ -19,6 +19,9 @@ import { AccessToken } from 'livekit-server-sdk';
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'snakes-and-ladders3d';
 const ROOM_RE = /^[A-HJ-NP-Z]{4}$/;
 const IDENTITY_RE = /^player_[0-3]$/;
+// Namespaces the LiveKit room per game so different games sharing one LiveKit
+// project can never land in the same voice room even with an identical code.
+const GAME_RE = /^[a-z][a-z0-9-]{1,15}$/;
 
 const JWKS = createRemoteJWKSet(
   new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'),
@@ -62,12 +65,15 @@ export default async function handler(req, res) {
     }
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-    const room = String(body.room || '').toUpperCase();
+    const code = String(body.room || '').toUpperCase();
+    const game = String(body.game || '').toLowerCase();
     const identity = String(body.identity || '');
-    if (!ROOM_RE.test(room) || !IDENTITY_RE.test(identity)) {
+    if (!ROOM_RE.test(code) || !GAME_RE.test(game) || !IDENTITY_RE.test(identity)) {
       res.status(400).json({ error: 'invalid-room-or-identity' });
       return;
     }
+    // Per-game namespaced LiveKit room name.
+    const room = `${game}-${code}`;
 
     const token = new AccessToken(apiKey, apiSecret, {
       identity,

@@ -124,6 +124,7 @@ function updateVoiceUI(status) {
 function ensureVoiceChat() {
   if (voiceChat || roomCode == null || playerIndex == null) return voiceChat;
   voiceChat = createLiveKitVoice({
+    game: 'snl',
     roomCode,
     identity: `player_${playerIndex}`,
     displayName: playerNames[playerIndex] || `Player ${playerIndex + 1}`,

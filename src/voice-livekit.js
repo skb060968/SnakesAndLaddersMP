@@ -15,7 +15,7 @@
 
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL;
 
-export function createLiveKitVoice({ roomCode, identity, displayName, getIdToken, onStatus, onSpeakers }) {
+export function createLiveKitVoice({ game, roomCode, identity, displayName, getIdToken, onStatus, onSpeakers }) {
   let room = null;
   let joined = false;
   let connecting = false;
@@ -43,7 +43,7 @@ export function createLiveKitVoice({ roomCode, identity, displayName, getIdToken
       const response = await fetch('/api/livekit-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ room: roomCode, identity, name: displayName }),
+        body: JSON.stringify({ game, room: roomCode, identity, name: displayName }),
       });
       if (!response.ok) throw new Error('token-request-failed');
       const { token } = await response.json();
