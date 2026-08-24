@@ -1,16 +1,17 @@
 /**
- * Optional voice-only chat for Snakes & Ladders, powered by LiveKit Cloud.
+ * Optional voice-only chat client, powered by LiveKit Cloud. Standard across all
+ * games — do not fork per game; only the `game` id and mount differ.
  *
- * Design guarantees:
+ * Guarantees:
  * - Opt-in: nothing captures the mic until the player taps the voice button.
  * - Additive: every step is wrapped so a failure (token, network, LiveKit down,
  *   mic denied) only reports a status; it never throws into gameplay.
- * - livekit-client is imported dynamically, so the game bundle and startup are
+ * - livekit-client is imported dynamically, so the game bundle/startup are
  *   unaffected and a load failure can't break the app.
  * - All players in the room may join one shared voice call (LiveKit SFU).
  *
- * The token is minted by /api/livekit-token, which verifies the caller's
- * Firebase ID token before issuing a LiveKit JWT.
+ * Token is minted by /api/livekit-token, which verifies the caller's Firebase
+ * ID token. The LiveKit room is namespaced per game (`<game>-<code>`).
  */
 
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL;
@@ -106,7 +107,6 @@ export function createLiveKitVoice({ game, roomCode, identity, displayName, getI
     if (!room) return muted;
     muted = !muted;
     try { await room.localParticipant.setMicrophoneEnabled(!muted); } catch (_) {}
-    // Re-attempt audio unlock (iOS) on this user gesture.
     try { await room.startAudio(); } catch (_) {}
     emit('connected');
     return muted;

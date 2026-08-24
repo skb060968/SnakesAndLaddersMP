@@ -701,46 +701,8 @@ body {
 
 .bottom-row .mute-toggle,
 .bottom-row .btn-end-game,
-.bottom-row .voice-toggle,
-.bottom-row .voice-mute {
+.bottom-row #voice-widget {
   flex: 0 0 auto;
-}
-
-.voice-toggle {
-  border: 0;
-  border-radius: 999px;
-  padding: 7px 12px;
-  background: #fff;
-  color: #14213d;
-  font-size: 0.82rem;
-  font-weight: 800;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.voice-toggle.active {
-  background: #16a34a;
-  color: #fff;
-}
-
-.voice-mute {
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 50%;
-  background: #fff;
-  color: #14213d;
-  font-size: 1.05rem;
-  cursor: pointer;
-}
-
-.voice-mute.muted {
-  background: #f59e0b;
-  color: #451a03;
-}
-
-.voice-mute[hidden] {
-  display: none !important;
 }
 
 /* Active-speaker indicator on player rows (glowing mic, keyed by slot). */
