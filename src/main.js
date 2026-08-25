@@ -1244,8 +1244,13 @@ if ('serviceWorker' in navigator) {
 function wireMuteToggle() {
   const toggle = document.getElementById('mute-toggle');
   if (!toggle) return;
-  toggle.checked = isMuted();
-  toggle.addEventListener('change', () => toggleMute());
+  const render = (muted) => {
+    toggle.textContent = muted ? '🔇' : '🔊';
+    toggle.setAttribute('aria-pressed', String(muted));
+    toggle.setAttribute('aria-label', muted ? 'Unmute game sound' : 'Mute game sound');
+  };
+  render(isMuted());
+  toggle.addEventListener('click', () => render(toggleMute()));
 }
 
 /* ======= PWA APP BANNER ======= */
