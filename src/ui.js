@@ -581,7 +581,7 @@ export function renderPositions(state, localIdx) {
     const isMe = i === localIdx;
     const isCurrent = i === state.currentPlayerIndex;
     const dot = colorDots[p.color] || '⚪';
-    const meTag = isMe ? ' (you)' : '';
+    const meTag = isMe ? '⭐' : '';
     const label = document.createElement('span');
     label.className = 'player-row-label';
     label.textContent = `${dot} ${p.emoji} ${p.name}${meTag}: ${p.position}`;
