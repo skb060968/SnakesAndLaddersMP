@@ -960,7 +960,13 @@ body {
   /* Side-by-side board + control panel — all sizing in vw / svh so the
    * gap-to-board ratio stays constant under zoom. */
   .app:has(#gameplay:not([hidden])) {
-    /* keep gap 0; flex direction handled below */
+    /* The board + control panel are sized in vw/svh and sit side by side, so
+       the gameplay shell must span the viewport instead of the 480px portrait
+       cap. Otherwise the flex row is squeezed into 480px, the control panel
+       shrinks below its intended size, and its content overlaps the board on
+       large screens / TVs. (Only gameplay is unconstrained; menu/lobby keep
+       the 480px cap.) */
+    max-width: none;
   }
   #gameplay {
     flex-direction: row;
@@ -971,10 +977,12 @@ body {
   .board-wrapper {
     width: min(45vw, 90svh);
     height: min(45vw, 90svh);
+    flex-shrink: 0;
   }
   .control-column {
     width: min(45vw, 90svh);
     height: min(45vw, 90svh);
+    flex-shrink: 0;
   }
 }
 
