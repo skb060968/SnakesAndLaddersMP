@@ -680,24 +680,29 @@ body {
   width: 100%;
   display: flex;
   flex-direction: row;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   justify-content: center;
 }
 
-/* Compact controls row: the board button hugs its label (no grow, no shrink)
-   so it never balloons with side padding, and never has to shrink when the
-   voice pill grows — leaving the voice control visually centered in the row. */
+/* Compact controls row: the board button is the only flexible item — it shrinks
+   (its label truncating with an ellipsis if needed) so the voice pill, sound
+   mute and end-game button always stay side by side inside the control panel
+   without pushing past its edge. */
 .bottom-row .btn {
   max-width: none;
   flex: 1 1 0;
 }
 
 .bottom-row .btn.compact-board {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   padding-left: 8px;
   padding-right: 8px;
+  font-size: 12px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bottom-row .mute-toggle,
