@@ -581,10 +581,10 @@ export function renderPositions(state, localIdx) {
     const isMe = i === localIdx;
     const isCurrent = i === state.currentPlayerIndex;
     const dot = colorDots[p.color] || '⚪';
-    const meTag = isMe ? '⭐' : '';
+    const meTag = isMe ? '👉🏻' : '';
     const label = document.createElement('span');
     label.className = 'player-row-label';
-    label.textContent = `${dot} ${p.emoji} ${p.name}${meTag}: ${p.position}`;
+    label.textContent = `${meTag} ${dot} ${p.emoji} ${p.name}: ${p.position}`;
     const speaker = document.createElement('span');
     speaker.className = 'speaker-indicator';
     speaker.setAttribute('aria-hidden', 'true');
