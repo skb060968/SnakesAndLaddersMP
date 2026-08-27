@@ -965,28 +965,35 @@ body {
   #gameplay {
     flex-direction: row;
     justify-content: center;
-    gap: 4vw;
+    /* Bounded so the gap doesn't keep widening between the capped squares. */
+    gap: min(4vw, 48px);
     padding: 1svh 1vw;
   }
-  /* The board column must hug the board so the 4vw gap is measured from the
-     board's real edge. Its base width:100% otherwise pins the column to the
-     480px app width while the board itself is min(45vw,90svh) — far wider on a
-     TV/desktop — so the board overflows this column into the gap and its frame
-     ends up under the control panel. (That overflow scales with the viewport
-     while the gap is 4vw, which is why zooming changes the spacing.) */
+  /* The board column must hug the board so the gap is measured from the board's
+     real edge. Its base width:100% otherwise pins the column to the 480px app
+     width while the board itself is min(45vw,90svh) — far wider on a TV/desktop
+     — so the board overflows this column into the gap and its frame ends up
+     under the control panel. */
   .board-column {
     width: auto;
     flex: 0 0 auto;
   }
+  /* Cap the board + control panel at 560px on large screens. Past ~1244px wide
+     the squares stop growing and the game centers, so the panel never balloons
+     (its phone-designed contents would otherwise look tiny inside a huge box).
+     The panel stays between ~405px (at the 901px breakpoint) and 560px, and the
+     content fits comfortably across that whole range, so no zoom level can
+     squeeze it into overflow — and zooming in far enough simply flips to the
+     portrait layout. */
   .board-wrapper {
-    width: min(45vw, 90svh);
-    height: min(45vw, 90svh);
+    width: min(45vw, 90svh, 560px);
+    height: min(45vw, 90svh, 560px);
   }
   /* Keep the control panel at full size so the flex row can't shrink it toward
      the board; it stays beside the board with the intended gap. */
   .control-column {
-    width: min(45vw, 90svh);
-    height: min(45vw, 90svh);
+    width: min(45vw, 90svh, 560px);
+    height: min(45vw, 90svh, 560px);
     flex-shrink: 0;
   }
 }
