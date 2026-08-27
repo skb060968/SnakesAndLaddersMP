@@ -1,5 +1,5 @@
 /* Snakes & Ladders MP service worker — deliberate updates and safe fallbacks. */
-const CACHE_NAME = 'snl-mp-v51';
+const CACHE_NAME = 'snl-mp-v52';
 const STATIC_ASSETS = [
   '/', '/index.html', '/manifest.json',
   '/images/board.png', '/images/board1.png', '/images/board2.png',

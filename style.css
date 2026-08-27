@@ -968,13 +968,26 @@ body {
     gap: 4vw;
     padding: 1svh 1vw;
   }
+  /* The board column must hug the board so the 4vw gap is measured from the
+     board's real edge. Its base width:100% otherwise pins the column to the
+     480px app width while the board itself is min(45vw,90svh) — far wider on a
+     TV/desktop — so the board overflows this column into the gap and its frame
+     ends up under the control panel. (That overflow scales with the viewport
+     while the gap is 4vw, which is why zooming changes the spacing.) */
+  .board-column {
+    width: auto;
+    flex: 0 0 auto;
+  }
   .board-wrapper {
     width: min(45vw, 90svh);
     height: min(45vw, 90svh);
   }
+  /* Keep the control panel at full size so the flex row can't shrink it toward
+     the board; it stays beside the board with the intended gap. */
   .control-column {
     width: min(45vw, 90svh);
     height: min(45vw, 90svh);
+    flex-shrink: 0;
   }
 }
 
