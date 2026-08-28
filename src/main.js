@@ -78,6 +78,13 @@ let unsubscribeRoom = null;
 let _resultsShown = false;
 let voiceWidget = null;
 
+/* Lobby presence: a dropped player lingers briefly with the OFFLINE treatment,
+   then is pruned. The host and the local player are never hidden; the Start
+   gate counts only connected players. */
+const LOBBY_PRUNE_DELAY_MS = 2500;
+let lobbyDisconnectedSince = {};
+let lobbyPruneTimer = null;
+
 /* ======= SESSION PERSISTENCE ======= */
 
 function saveSession() {
@@ -354,13 +361,8 @@ function setupLobby() {
 
   unsubscribeRoom = listenRoom(roomCode, {
     onPlayersChange: (players) => {
-      // Filter out ghost players (no name) — leftover from stale onDisconnect
-      const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
       roomPlayers = players;
-      const arr = keys.map((k) => players[k]);
-      playerNames = arr.map((p) => p.name || 'Unknown');
-      // Pass both the players array and their keys for rendering
-      renderLobbyPlayers(arr, keys);
+      refreshLobby(players);
     },
     onStatusChange: async (status, roomSnapshot) => {
       // Only initialize game flow on the FIRST transition to active.
@@ -405,6 +407,51 @@ function setupLobby() {
   });
 }
 
+/** Rebuild the lobby list and Start gate from a players snapshot. */
+function refreshLobby(players) {
+  const namedKeys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
+  const arr = namedKeys.map((k) => players[k]);
+  // Full named list — indexed by slot elsewhere (e.g. voice display name), so
+  // its meaning must stay "all named players".
+  playerNames = arr.map((p) => p.name || 'Unknown');
+  trackLobbyDisconnections(players);
+  const visibleKeys = namedKeys.filter((k) => isLobbyPlayerVisible(k, players[k]));
+  const visibleArr = visibleKeys.map((k) => players[k]);
+  const connectedCount = namedKeys.filter((k) => players[k]?.connected !== false).length;
+  const startBtn = document.getElementById('btn-start-online');
+  if (startBtn && isHost) startBtn.disabled = connectedCount < 2;
+  renderLobbyPlayers(visibleArr, visibleKeys);
+}
+
+/** Connected players, the host (player_0), and the local player are always
+    shown; a dropped player lingers with the OFFLINE treatment, then is pruned. */
+function isLobbyPlayerVisible(key, player) {
+  if (player?.connected !== false) return true;
+  if (key === 'player_0' || key === `player_${playerIndex}`) return true;
+  const since = lobbyDisconnectedSince[key];
+  return typeof since === 'number' && Date.now() - since < LOBBY_PRUNE_DELAY_MS;
+}
+
+/** Track when each player first went offline so a dropped row can linger then prune. */
+function trackLobbyDisconnections(players) {
+  const stamp = Date.now();
+  const next = {};
+  let pruneNeeded = false;
+  Object.keys(players).forEach((key) => {
+    if (players[key]?.name && players[key]?.connected === false) {
+      next[key] = lobbyDisconnectedSince[key] || stamp;
+      const prunable = key !== 'player_0' && key !== `player_${playerIndex}`;
+      if (prunable && stamp - next[key] < LOBBY_PRUNE_DELAY_MS) pruneNeeded = true;
+    }
+  });
+  lobbyDisconnectedSince = next;
+  if (!pruneNeeded || lobbyPruneTimer !== null) return;
+  lobbyPruneTimer = setTimeout(() => {
+    lobbyPruneTimer = null;
+    refreshLobby(roomPlayers);
+  }, LOBBY_PRUNE_DELAY_MS);
+}
+
 function renderLobbyPlayers(playersArr, playerKeys = []) {
   const list = document.getElementById('lobby-player-list');
   if (!list) return;
@@ -415,6 +462,7 @@ function renderLobbyPlayers(playersArr, playerKeys = []) {
   };
   playersArr.forEach((player, index) => {
     const li = document.createElement('li');
+    if (player.connected === false) li.classList.add('disconnected');
     const dot = document.createElement('span');
     dot.textContent = colorDots[player.color] || '⚪';
     const emojiSpan = document.createElement('span');
@@ -425,6 +473,12 @@ function renderLobbyPlayers(playersArr, playerKeys = []) {
     li.appendChild(dot);
     li.appendChild(emojiSpan);
     li.appendChild(nameSpan);
+    if (player.connected === false) {
+      const offline = document.createElement('span');
+      offline.className = 'offline-badge';
+      offline.textContent = 'OFFLINE';
+      li.appendChild(offline);
+    }
     if (index === 0) {
       const badge = document.createElement('span');
       badge.className = 'host-badge';
@@ -463,14 +517,14 @@ function wireLobby() {
   const btnStart = document.getElementById('btn-start-online');
   if (btnStart) btnStart.addEventListener('click', async () => {
     if (!isHost || !roomCode) return;
-    if (playerNames.length < 2) { showToast('Need at least 2 players'); return; }
-    if (playerNames.length > 4) { showToast('Maximum 4 players'); return; }
     try {
       const snap = await firebaseRetry(() => get(ref(db, `snl-rooms/${roomCode}/players`)));
       if (!snap.exists()) { showToast('No players found'); return; }
       const pd = snap.val();
-      // Filter out ghost players before starting game
-      const keys = Object.keys(pd).filter((k) => pd[k] && pd[k].name).sort();
+      // Only connected, named players start the game (ghosts/offline excluded).
+      const keys = Object.keys(pd).filter((k) => pd[k] && pd[k].name && pd[k].connected !== false).sort();
+      if (keys.length < 2) { showToast('Need at least 2 connected players'); return; }
+      if (keys.length > 4) { showToast('Maximum 4 players'); return; }
       roomPlayers = pd;
       const infos = keys.map((k) => ({
         slotKey: k,

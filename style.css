@@ -334,6 +334,20 @@ body {
   color: #fff;
 }
 
+.player-list li.disconnected {
+  opacity: 0.5;
+}
+
+.player-list li .offline-badge {
+  font-size: 0.65rem;
+  background: rgba(255, 77, 77, 0.9);
+  color: #fff;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-weight: 800;
+  margin-left: 6px;
+}
+
 .player-list li .host-badge {
   font-size: 0.7rem;
   background: #ffd700;
