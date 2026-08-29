@@ -521,9 +521,14 @@ function wireLobby() {
       const snap = await firebaseRetry(() => get(ref(db, `snl-rooms/${roomCode}/players`)));
       if (!snap.exists()) { showToast('No players found'); return; }
       const pd = snap.val();
-      // Only connected, named players start the game (ghosts/offline excluded).
-      const keys = Object.keys(pd).filter((k) => pd[k] && pd[k].name && pd[k].connected !== false).sort();
-      if (keys.length < 2) { showToast('Need at least 2 connected players'); return; }
+      // The rules tie game/positions to the room's player nodes (player_0 &
+      // player_1 mandatory, player_2/3 must match the players node), so the
+      // game roster must be ALL named players — an offline player stays in the
+      // roster and takes part when they reconnect. Gate on connected count so
+      // at least two real players are present to actually play.
+      const keys = Object.keys(pd).filter((k) => pd[k] && pd[k].name).sort();
+      const connectedKeys = keys.filter((k) => pd[k].connected !== false);
+      if (connectedKeys.length < 2) { showToast('Need at least 2 connected players to start'); return; }
       if (keys.length > 4) { showToast('Maximum 4 players'); return; }
       roomPlayers = pd;
       const infos = keys.map((k) => ({
