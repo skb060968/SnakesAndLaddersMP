@@ -225,6 +225,28 @@ body {
 .btn-end-game:active { transform: scale(0.9); }
 .btn-end-game[hidden] { display: none !important; }
 
+/* Host-only escape hatch shown while the player who owes a roll sits offline.
+   Lets the host pass the turn on instead of waiting out the grace period. */
+.btn-skip-offline {
+  border: none;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #f0a020 0%, #d97706 100%);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.btn-skip-offline:hover { filter: brightness(1.08); }
+.btn-skip-offline:active { transform: scale(0.95); }
+.btn-skip-offline[hidden] { display: none !important; }
+
+/* A player who dropped off the network stays in the game, so mark them. */
+.player-row.disconnected { opacity: 0.55; }
+.offline-emoji { margin-left: 4px; }
+
 /* ======= 5) FORM INPUTS ======= */
 
 .text-input {
@@ -1240,5 +1262,24 @@ body {
   
   .app-banner-btn.secondary {
     display: none; /* Hide "Continue Here" on small screens */
+  }
+}
+
+/* ==========================================================================
+   Update toast slide-in
+   Moved out of an inline <style> block in index.html: Vite 7's
+   html-inline-proxy plugin fails to resolve inline CSS during `vite build`
+   ("No matching HTML proxy module found"), which broke the production build.
+   Every other game keeps this rule in the stylesheet, so this also aligns
+   Snakes & Ladders with the rest of the collection.
+   ========================================================================== */
+@keyframes slideUp {
+  from {
+    transform: translateX(-50%) translateY(100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
   }
 }

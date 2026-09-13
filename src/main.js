@@ -13,6 +13,8 @@ import {
   setupDisconnectHandler,
   stopPresenceTracking,
   leavePlayer,
+  markSelfOffline,
+  skipTurnAsHost,
   removePlayer,
   endRoom,
   deleteRoom,
@@ -85,6 +87,22 @@ const LOBBY_PRUNE_DELAY_MS = 2500;
 let lobbyDisconnectedSince = {};
 let lobbyPruneTimer = null;
 
+// How long a player may stay offline before the game stops waiting for them.
+// Long enough to survive a lift/tunnel, short enough that the table isn't dead.
+const OFFLINE_GRACE_MS = 15000;
+// Consecutive missed turns before we stop granting the grace and skip an offline
+// player immediately, so someone gone for good doesn't pause every lap.
+const MAX_OFFLINE_SKIPS = 2;
+let hostLossTimer = null;      // peers: the host has gone offline
+let offlineTurnTimer = null;   // host: the player to roll has gone offline
+let offlineTurnKey = null;     // exact turn the timer was armed for
+let offlineSkips = {};         // host memory: slot key -> consecutive missed turns
+
+/** Slot keys presence currently reports as offline. */
+function offlineSlotKeys() {
+  return new Set(Object.keys(roomPlayers).filter((k) => roomPlayers[k]?.connected === false));
+}
+
 /* ======= SESSION PERSISTENCE ======= */
 
 function saveSession() {
@@ -106,7 +124,137 @@ function loadSession() {
  * Mounted lazily on first game start; torn down when leaving the room.
  */
 
+/* ======= HOST-LOSS WATCHDOG =======
+ * Leaving a running game is deliberately not allowed, so a player who vanishes
+ * mid-game stays in the room as an OFFLINE card.
+ *
+ * The host is the only client that can end the game, so if the host disappears
+ * the remaining players are stuck on the board with no way out. After the grace
+ * period each peer closes the room locally. Gated on a running game so a host
+ * briefly backgrounding their phone in the lobby (sharing the room code, say)
+ * never ejects waiting joiners.
+ * ================================================================ */
+function clearHostLossWatch() {
+  if (hostLossTimer) { clearTimeout(hostLossTimer); hostLossTimer = null; }
+}
+
+function clearOfflineTurnWatch() {
+  if (offlineTurnTimer) { clearTimeout(offlineTurnTimer); offlineTurnTimer = null; }
+  offlineTurnKey = null;
+}
+
+/** Slot key of the player whose roll everyone is waiting on. */
+function currentSlotKey() {
+  return state?.players?.[state.currentPlayerIndex]?.slotKey || null;
+}
+
+/** Identifies one exact turn, so a timer armed for it is dropped if play moves on. */
+function turnGeneration() {
+  return `${state?.roundId}:${state?.revision}:${currentSlotKey()}`;
+}
+
+function evaluateOfflineWatch() {
+  updateSkipOfflineButton();
+  const running = Boolean(state) && state.status !== 'finished' && !_resultsShown;
+
+  // --- the host went offline: peers close the room once the grace expires ---
+  if (!isHost && roomCode && running && roomPlayers.player_0?.connected === false) {
+    if (!hostLossTimer) {
+      hostLossTimer = setTimeout(() => {
+        hostLossTimer = null;
+        if (isHost || !roomCode) return;
+        if (roomPlayers.player_0?.connected !== false) return;   // host came back
+        closeRoomAfterHostLoss();
+      }, OFFLINE_GRACE_MS);
+    }
+  } else {
+    clearHostLossWatch();
+  }
+
+  // --- the player to roll went offline: only the host can move the turn on ---
+  if (!isHost || !running) { clearOfflineTurnWatch(); return; }
+  const cur = currentSlotKey();
+  if (!cur) { clearOfflineTurnWatch(); return; }
+  if (roomPlayers[cur]?.connected !== false) {
+    offlineSkips[cur] = 0;            // present again — forgive earlier misses
+    clearOfflineTurnWatch();
+    return;
+  }
+  // Somebody who has already burned their grace gets skipped straight away.
+  const delay = (offlineSkips[cur] || 0) >= MAX_OFFLINE_SKIPS ? 0 : OFFLINE_GRACE_MS;
+  const gen = turnGeneration();
+  if (offlineTurnKey === gen) return;                            // already armed for this turn
+  clearOfflineTurnWatch();
+  offlineTurnKey = gen;
+  offlineTurnTimer = setTimeout(() => {
+    offlineTurnTimer = null;
+    resolveOfflineTurn(gen);
+  }, delay);
+}
+
+/** Kept for the host-loss call sites that predate the combined watchdog. */
+function evaluateHostLossWatch() {
+  evaluateOfflineWatch();
+}
+
+/** HOST ONLY. Passes the turn on when the player who owes a roll is offline. */
+async function resolveOfflineTurn(gen) {
+  if (!isHost || !roomCode || !state || state.status === 'finished') return;
+  if (turnGeneration() !== gen) return;                          // play already moved on
+  const cur = currentSlotKey();
+  if (!cur || roomPlayers[cur]?.connected !== false) return;     // came back in time
+
+  const misses = (offlineSkips[cur] || 0) + 1;
+  offlineSkips[cur] = misses;
+  // Players who have used up their grace are stepped over entirely, so the turn
+  // lands on somebody who can actually roll.
+  const exhausted = Object.keys(offlineSkips).filter((k) => (
+    offlineSkips[k] >= MAX_OFFLINE_SKIPS && roomPlayers[k]?.connected === false
+  ));
+  const name = roomPlayers[cur]?.name || 'That player';
+  try {
+    const committed = await skipTurnAsHost(roomCode, exhausted);
+    if (!committed) return;   // nobody else could take it; host can still End Game
+    showToast(misses >= MAX_OFFLINE_SKIPS
+      ? `${name} is offline — skipping their turns.`
+      : `${name} is offline — turn skipped.`, 3000);
+  } catch (err) {
+    console.error('Offline skip failed:', err);
+  }
+}
+
+/** Host-only shortcut so the host need not sit out the grace period. */
+function updateSkipOfflineButton() {
+  const btn = document.getElementById('btn-skip-offline');
+  if (!btn) return;
+  const running = Boolean(state) && state.status !== 'finished' && !_resultsShown;
+  const cur = running ? currentSlotKey() : null;
+  const show = isHost && Boolean(cur) && roomPlayers[cur]?.connected === false;
+  btn.hidden = !show;
+  if (!show) return;
+  const name = roomPlayers[cur]?.name || 'Player';
+  btn.textContent = `⏭ Skip ${name}`;
+  btn.title = `${name} is not connected — skip their turn now`;
+}
+
+/** PEERS ONLY. The host is gone, so the room is over for this device. */
+async function closeRoomAfterHostLoss() {
+  const code = roomCode;
+  const idx = playerIndex;
+  showToast('Room closed and game ended', 3500);
+  if (code && idx != null) {
+    // We cannot delete our own row mid-game — the rules forbid it — but marking
+    // ourselves offline keeps the roster honest if the host ever returns.
+    try { await markSelfOffline(code, idx); }
+    catch (err) { console.error('markSelfOffline failed:', err); }
+  }
+  cleanupAndGoHome();
+}
+
 function cleanupAndGoHome() {
+  clearHostLossWatch();
+  clearOfflineTurnWatch();
+  offlineSkips = {};
   if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
   if (window._snlReadyCleanup) window._snlReadyCleanup();
   if (voiceWidget) { try { voiceWidget.stop(); } catch (_) {} }
@@ -363,6 +511,11 @@ function setupLobby() {
     onPlayersChange: (players) => {
       roomPlayers = players;
       refreshLobby(players);
+      // Presence lives on the players node, not the game node — re-render the
+      // in-game list so the not-connected marker appears promptly.
+      if (state && state.status !== 'finished') renderUI();
+      // Presence is also what arms/cancels the stall watchdogs.
+      evaluateOfflineWatch();
     },
     onStatusChange: async (status, roomSnapshot) => {
       // Only initialize game flow on the FIRST transition to active.
@@ -663,7 +816,8 @@ function renderUI() {
 
   const cur = state.players[state.currentPlayerIndex];
   setTurn(`${cur?.emoji || ''} ${cur?.name || 'Player'}'s turn`);
-  renderPositions(state, localStateIndex());
+  renderPositions(state, localStateIndex(), offlineSlotKeys());
+  updateSkipOfflineButton();
 
   // Highlight current player's token
   highlightActiveToken(state.currentPlayerIndex);
@@ -1041,6 +1195,16 @@ function wireEndGame() {
       showToast('Failed to end the round.');
     }
   });
+
+  // Resolve a stalled turn immediately rather than waiting out the grace period.
+  document.getElementById('btn-skip-offline')?.addEventListener('click', () => {
+    if (!isHost || !state || state.status === 'finished') return;
+    const cur = currentSlotKey();
+    if (!cur || roomPlayers[cur]?.connected !== false) return;
+    const gen = turnGeneration();
+    clearOfflineTurnWatch();
+    resolveOfflineTurn(gen);
+  });
 }
 
 /* ======= PLAY AGAIN / HOME ======= */
@@ -1090,7 +1254,12 @@ function wireResults() {
         try { await setPlayerReady(roomCode, playerIndex, 'left'); } catch (_) {}
       }
       if (isHost) {
-        try { await deleteRoom(roomCode); } catch (_) {}
+        try { await deleteRoom(roomCode); } catch (err) { console.error('Delete room from results failed:', err); }
+      } else if (playerIndex != null) {
+        // Remove our own player row as well. The 'left' ready flag above is
+        // cleared by resetRoom(), so without this the host's "Play Again"
+        // lobby would still list a ghost player who already went home.
+        try { await leavePlayer(roomCode, playerIndex); } catch (err) { console.error('Leave from results failed:', err); }
       }
     }
     cleanupAndGoHome();

@@ -564,9 +564,15 @@ export function setTurn(text) {
   if (el) el.textContent = text || '';
 }
 
-export function renderPositions(state, localIdx) {
+export /**
+ * @param {object} state
+ * @param {number} localIdx
+ * @param {Set<string>} [offlineKeys] slot keys presence currently reports as offline
+ */
+function renderPositions(state, localIdx, offlineKeys) {
   const el = document.getElementById('positions');
   if (!el) return;
+  const offline = offlineKeys instanceof Set ? offlineKeys : new Set();
   el.innerHTML = '';
   el.className = `positions players-${state.players.length}`;
   // Map color ids to dot emojis (visual cue in the player list)
@@ -590,6 +596,17 @@ export function renderPositions(state, localIdx) {
     speaker.setAttribute('aria-hidden', 'true');
     speaker.textContent = '🎙️';
     row.append(label, speaker);
+    // Presence cue: a player who has dropped off the network stays in the game
+    // (quitting mid-game isn't allowed) so flag them rather than hiding them.
+    if (p.slotKey && offline.has(p.slotKey)) {
+      row.classList.add('disconnected');
+      const off = document.createElement('span');
+      off.className = 'offline-emoji';
+      off.textContent = '📴';
+      off.title = `${p.name} is not connected`;
+      off.setAttribute('aria-label', `${p.name} is not connected`);
+      row.appendChild(off);
+    }
     if (isCurrent) {
       row.style.color = '#ffd700';
       row.style.fontWeight = '900';

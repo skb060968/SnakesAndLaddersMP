@@ -268,6 +268,58 @@ export async function commitMove(roomCode, expectedRevision, serializedState, la
   return result.snapshot.val();
 }
 
+/**
+ * HOST ONLY. Hands the turn to the next eligible player when the current one has
+ * gone offline and stopped rolling.
+ *
+ * Every board field is left exactly as it was — only `currentPlayerKey` moves —
+ * which is what the `skip` rule branch permits. `lastMove` is dropped: the rules
+ * require lastMove.revision to match game.revision, and a skip bumps the revision
+ * without producing a roll, so there is no coherent move to carry forward. The
+ * clients treat a missing/stale lastMove as "nothing to animate".
+ *
+ * @param {string} roomCode
+ * @param {string[]} [skipKeys] slots to pass over as well as the current player
+ *   (offline players who have already used up their grace)
+ * @returns {Promise<object|null>} the committed game, or null if nobody else could take the turn
+ */
+export async function skipTurnAsHost(roomCode, skipKeys = []) {
+  const user = await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  const pass = new Set(skipKeys);
+  const result = await runTransaction(ref(db, `${roomPath(code)}/game`), (current) => {
+    if (!current || current.status !== 'playing') return undefined;
+    const cur = current.currentPlayerKey;
+    // The players actually in this match are exactly the position keys.
+    const seats = Object.keys(current.positions || {}).sort();
+    const from = seats.indexOf(cur);
+    if (from < 0 || seats.length < 2) return undefined;
+
+    let next = null;
+    for (let step = 1; step <= seats.length; step += 1) {
+      const k = seats[(from + step) % seats.length];
+      if (k === cur) continue;
+      if (current.won?.[k]) continue;      // already home
+      if (pass.has(k)) continue;           // offline and out of grace
+      next = k;
+      break;
+    }
+    if (!next) return undefined;           // nobody able to take the turn
+
+    const revision = current.revision + 1;
+    const out = {
+      ...current,
+      currentPlayerKey: next,
+      roundId: current.roundId,
+      revision,
+      operation: operation('skip', user, cur, current.roundId, revision),
+    };
+    delete out.lastMove;
+    return out;
+  }, { applyLocally: false });
+  return result.committed ? result.snapshot.val() : null;
+}
+
 async function ownedPlayerKey(code, user) {
   const snapshot = await get(ref(db, `${roomPath(code)}/players`));
   const players = snapshot.val() || {};
@@ -322,7 +374,27 @@ export async function leavePlayer(roomCode, playerIndex) {
   const connectedRef = ref(db, `${roomPath(code)}/players/${key}/connected`);
   await stopPresenceTracking();
   try { await onDisconnect(connectedRef).cancel(); } catch (_) {}
+  // Mark ourselves offline BEFORE attempting removal. If the remove is rejected
+  // (rules forbid quitting a running game) peers still see an accurate OFFLINE
+  // badge instead of a ghost player that still looks connected.
+  try { await set(connectedRef, false); } catch (_) {}
   await remove(ref(db, `${roomPath(code)}/players/${key}`));
+}
+
+/** Marks the local player offline and stops presence, WITHOUT attempting removal.
+ *  Used when we have to abandon a running game (the host went offline, so the
+ *  room is closing): the rules forbid deleting a player mid-game, so removal
+ *  would only fail — but `connected` is always writable by its owner, which is
+ *  what keeps the roster honest for anyone still watching. */
+export async function markSelfOffline(roomCode, playerIndex) {
+  await requireUser();
+  const code = normalizeRoomCode(roomCode);
+  const key = playerKeyFor(playerIndex);
+  if (!PLAYER_KEY_RE.test(key)) throw new Error('Invalid player slot');
+  const connectedRef = ref(db, `${roomPath(code)}/players/${key}/connected`);
+  await stopPresenceTracking();
+  try { await onDisconnect(connectedRef).cancel(); } catch (_) {}
+  await set(connectedRef, false);
 }
 
 export async function removePlayer(roomCode, playerIndex) {
