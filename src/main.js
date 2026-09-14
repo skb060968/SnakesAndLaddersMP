@@ -4,6 +4,11 @@
  * and gameplay (board, dice, animations, results).
  */
 
+// On-device diagnostics: records failures to localStorage and adds a 5-tap
+// viewer with a Copy button. Import-only integration; must come first so
+// startup errors are captured too.
+import './diagnostics.js';
+
 import { showScreen, showToast } from './platform-ui.js';
 import { initDeepLinkHandler, createShareHandler, showQRCode } from './deep-link-handler.js';
 import {
