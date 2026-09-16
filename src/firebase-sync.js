@@ -198,6 +198,22 @@ export async function setupDisconnectHandler(roomCode, playerIndex) {
   return stopPresence;
 }
 
+/** Fires `onRestore()` each time THIS device regains its Firebase connection after
+ *  having lost it. The first emission after subscribing is treated as the baseline,
+ *  so a normal page load never counts as a "reconnect". Returns an unsubscribe. */
+export function watchReconnect(onRestore) {
+  const infoRef = ref(db, '.info/connected');
+  let wasOffline = false;
+  const handler = (snapshot) => {
+    if (snapshot.val() !== true) { wasOffline = true; return; }
+    if (!wasOffline) return;
+    wasOffline = false;
+    try { onRestore(); } catch (error) { console.warn('reconnect handler failed:', error); }
+  };
+  onValue(infoRef, handler);
+  return () => off(infoRef, 'value', handler);
+}
+
 export async function stopPresenceTracking() {
   const cleanup = stopPresence;
   stopPresence = null;

@@ -20,6 +20,7 @@ import {
   leavePlayer,
   markSelfOffline,
   skipTurnAsHost,
+  watchReconnect,
   removePlayer,
   endRoom,
   deleteRoom,
@@ -158,7 +159,79 @@ function turnGeneration() {
   return `${state?.roundId}:${state?.revision}:${currentSlotKey()}`;
 }
 
+/* ======= RECONNECT RECONCILE =======
+ * A device that drops offline keeps whatever screen it had, and Firebase's local
+ * cache keeps whatever state it had. Neither is trustworthy once the connection
+ * returns: the room may have been closed, the game may have finished, or — the
+ * case that bit us — the OTHER players may have given up on us.
+ *
+ * That last one matters for the host. Peers eject themselves after the host-loss
+ * grace, but they cannot delete the room (host-only), so the host comes back to a
+ * live-looking game against empty seats and the turn watchdog would then hand them
+ * a win in a match they abandoned. A host who returns to find every other player
+ * gone gets the room closed instead. `hostWasAway` is what distinguishes that from
+ * "a player dropped while I was here", which the normal skip logic handles.
+ * ================================================================ */
+let unsubscribeReconnect = null;
+let hostWasAway = false;
+let abandonTimer = null;
+
+function clearAbandonWatch() {
+  if (abandonTimer) { clearTimeout(abandonTimer); abandonTimer = null; }
+}
+
+/** Slot keys of everyone in this match other than us. */
+function otherParticipantKeys() {
+  const mine = currentSlotKey();
+  return (state?.players || []).map((p) => p.slotKey).filter((k) => k && k !== mine);
+}
+
+async function reconcileAfterReconnect() {
+  if (!roomCode) return;
+  let room = null;
+  try { room = (await get(ref(db, `snl-rooms/${roomCode}`))).val(); }
+  catch (err) { console.warn('reconnect reconcile fetch failed:', err); return; }
+  if (!room || room.meta?.status === 'ended') {
+    showToast('Host has left. Room closed.', 3000);
+    cleanupAndGoHome();
+    return;
+  }
+  if (room.players) roomPlayers = room.players;
+  if (room.game?.status === 'finished' && state && !_resultsShown) {
+    state = { ...state, status: 'finished', winnerIndex: state.players.findIndex((p) => p.slotKey === room.game.winnerKey) };
+    handleWin();
+    return;
+  }
+  evaluateOfflineWatch();
+}
+
+/** HOST ONLY. Every other participant has left: end the room rather than "win" it. */
+function evaluateAbandonWatch() {
+  const running = Boolean(state) && state.status !== 'finished' && !_resultsShown;
+  if (!isHost || !running || !roomCode) { clearAbandonWatch(); return; }
+  const others = otherParticipantKeys();
+  if (!others.length) { clearAbandonWatch(); return; }
+  if (others.some((k) => roomPlayers[k]?.connected !== false)) {
+    hostWasAway = false;   // someone stayed through it — normal play, normal watchdog
+    clearAbandonWatch();
+    return;
+  }
+  if (!hostWasAway) { clearAbandonWatch(); return; }   // they dropped, not us: skip logic handles it
+  if (abandonTimer) return;
+  abandonTimer = setTimeout(async () => {
+    abandonTimer = null;
+    if (!isHost || !roomCode || !state || state.status === 'finished') return;
+    if (!otherParticipantKeys().every((k) => roomPlayers[k]?.connected === false)) return;
+    const code = roomCode;
+    showToast('The other players left while you were offline — game closed.', 3500);
+    try { await endRoom(code); } catch (err) { console.error('endRoom after abandon failed:', err); }
+    try { await deleteRoom(code); } catch (err) { console.error('deleteRoom after abandon failed:', err); }
+    cleanupAndGoHome();
+  }, OFFLINE_GRACE_MS);
+}
+
 function evaluateOfflineWatch() {
+  evaluateAbandonWatch();
   updateSkipOfflineButton();
   const running = Boolean(state) && state.status !== 'finished' && !_resultsShown;
 
@@ -204,6 +277,7 @@ function evaluateHostLossWatch() {
 
 /** HOST ONLY. Passes the turn on when the player who owes a roll is offline. */
 async function resolveOfflineTurn(gen) {
+  if (abandonTimer) return;   // everyone left while we were away — closing, not skipping
   if (!isHost || !roomCode || !state || state.status === 'finished') return;
   if (turnGeneration() !== gen) return;                          // play already moved on
   const cur = currentSlotKey();
@@ -259,8 +333,11 @@ async function closeRoomAfterHostLoss() {
 function cleanupAndGoHome() {
   clearHostLossWatch();
   clearOfflineTurnWatch();
+  clearAbandonWatch();
+  hostWasAway = false;
   offlineSkips = {};
   if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
+  if (unsubscribeReconnect) { unsubscribeReconnect(); unsubscribeReconnect = null; }
   if (window._snlReadyCleanup) window._snlReadyCleanup();
   if (voiceWidget) { try { voiceWidget.stop(); } catch (_) {} }
   stopJoinPreviewListener();
@@ -510,6 +587,8 @@ function setupLobby() {
 
   setupDisconnectHandler(roomCode, playerIndex)
     .catch((error) => console.warn('Presence setup failed:', error.message));
+  if (unsubscribeReconnect) unsubscribeReconnect();
+  unsubscribeReconnect = watchReconnect(() => { hostWasAway = true; reconcileAfterReconnect(); });
   if (unsubscribeRoom) unsubscribeRoom();
 
   unsubscribeRoom = listenRoom(roomCode, {
@@ -1329,6 +1408,7 @@ async function checkSession() {
     roomCode = session.roomCode;
     playerIndex = session.playerIndex;
     isHost = room.meta?.hostUid === auth.currentUser.uid && key === 'player_0';
+    hostWasAway = true;   // restored into a room we were not watching
     roomPlayers = room.players || {};
     playerNames = Object.keys(roomPlayers).sort().map((slot) => roomPlayers[slot]?.name).filter(Boolean);
     await setupDisconnectHandler(roomCode, playerIndex);
