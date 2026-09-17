@@ -1303,3 +1303,16 @@ body {
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
+
+/* =========================================================
+   DENSE LOBBY (STANDARD, Sep 2026)
+   With 5+ players the list switches to compact rows and scrolls inside a height
+   cap, so the room code and Start / Leave buttons stay on screen on a phone.
+   Driven by the DOM (:has(li:nth-child(5))) — no JS, nothing to keep in sync.
+   ========================================================= */
+.player-list:has(li:nth-child(5)) {
+  gap: 5px; padding: 10px;
+  max-height: min(42svh, 360px); overflow-y: auto; overscroll-behavior: contain;
+}
+.player-list:has(li:nth-child(5)) li { padding: 6px 10px; gap: 6px; font-size: 0.92rem; }
+.player-list:has(li:nth-child(5)) .remove-player-btn { width: 24px; height: 24px; font-size: 14px; }
