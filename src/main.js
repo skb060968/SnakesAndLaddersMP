@@ -154,6 +154,11 @@ function currentSlotKey() {
   return state?.players?.[state.currentPlayerIndex]?.slotKey || null;
 }
 
+/** A PEER (never this device) is offline. While a device is itself offline, its own
+ *  slot can read `connected: false` from its queued presence write — so the host must
+ *  never treat *itself* as the dropped player (no self-claim button, no self-forfeit). */
+const peerOffline = (key) => Boolean(key) && key !== `player_${playerIndex}` && roomPlayers[key]?.connected === false;
+
 /** Identifies one exact turn, so a timer armed for it is dropped if play moves on. */
 function turnGeneration() {
   return `${state?.roundId}:${state?.revision}:${currentSlotKey()}`;
@@ -253,7 +258,7 @@ function evaluateOfflineWatch() {
   if (!isHost || !running) { clearOfflineTurnWatch(); return; }
   const cur = currentSlotKey();
   if (!cur) { clearOfflineTurnWatch(); return; }
-  if (roomPlayers[cur]?.connected !== false) {
+  if (!peerOffline(cur)) {
     offlineSkips[cur] = 0;            // present again — forgive earlier misses
     clearOfflineTurnWatch();
     return;
@@ -281,7 +286,7 @@ async function resolveOfflineTurn(gen) {
   if (!isHost || !roomCode || !state || state.status === 'finished') return;
   if (turnGeneration() !== gen) return;                          // play already moved on
   const cur = currentSlotKey();
-  if (!cur || roomPlayers[cur]?.connected !== false) return;     // came back in time
+  if (!peerOffline(cur)) return;     // came back in time
 
   const misses = (offlineSkips[cur] || 0) + 1;
   offlineSkips[cur] = misses;
@@ -308,7 +313,7 @@ function updateSkipOfflineButton() {
   if (!btn) return;
   const running = Boolean(state) && state.status !== 'finished' && !_resultsShown;
   const cur = running ? currentSlotKey() : null;
-  const show = isHost && Boolean(cur) && roomPlayers[cur]?.connected === false;
+  const show = isHost && peerOffline(cur);
   btn.hidden = !show;
   if (!show) return;
   const name = roomPlayers[cur]?.name || 'Player';
@@ -1284,7 +1289,7 @@ function wireEndGame() {
   document.getElementById('btn-skip-offline')?.addEventListener('click', () => {
     if (!isHost || !state || state.status === 'finished') return;
     const cur = currentSlotKey();
-    if (!cur || roomPlayers[cur]?.connected !== false) return;
+    if (!peerOffline(cur)) return;
     const gen = turnGeneration();
     clearOfflineTurnWatch();
     resolveOfflineTurn(gen);
