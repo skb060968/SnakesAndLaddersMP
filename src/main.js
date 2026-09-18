@@ -238,6 +238,7 @@ function evaluateAbandonWatch() {
 function evaluateOfflineWatch() {
   evaluateAbandonWatch();
   updateSkipOfflineButton();
+  refreshTurnText();
   const running = Boolean(state) && state.status !== 'finished' && !_resultsShown;
 
   // --- the host went offline: peers close the room once the grace expires ---
@@ -899,12 +900,20 @@ function localStateIndex() {
   return state?.players?.findIndex((player) => player.slotKey === key) ?? -1;
 }
 
+/** Status line for the player to move — says so if they are offline, rather than
+ *  leaving "<name>'s turn" up while the watchdog waits to skip them. */
+function refreshTurnText() {
+  if (!state || state.status === 'finished') return;
+  const cur = state.players?.[state.currentPlayerIndex];
+  const who = `${cur?.emoji || ''} ${cur?.name || 'Player'}`;
+  setTurn(peerOffline(cur?.slotKey) ? `${who} is offline — turn will be skipped…` : `${who}'s turn`);
+}
+
 function renderUI() {
   if (!state) return;
   if (state.status === 'finished') return;
 
-  const cur = state.players[state.currentPlayerIndex];
-  setTurn(`${cur?.emoji || ''} ${cur?.name || 'Player'}'s turn`);
+  refreshTurnText();
   renderPositions(state, localStateIndex(), offlineSlotKeys());
   updateSkipOfflineButton();
 
