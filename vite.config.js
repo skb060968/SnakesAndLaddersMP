@@ -13,7 +13,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           firebase: ["firebase/app", "firebase/database", "firebase/auth"],
-          three: ["three"],
         },
       },
     },

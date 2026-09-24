@@ -1,12 +1,13 @@
 /* Snakes & Ladders MP service worker — deliberate updates and safe fallbacks. */
-const CACHE_NAME = 'snl-mp-v8';
+const CACHE_NAME = 'snl-mp-v9';
 const STATIC_ASSETS = [
   '/', '/index.html', '/manifest.json',
+  '/images/board.png', '/images/board1.png', '/images/board2.png',
   '/images/die-1.png', '/images/die-2.png', '/images/die-3.png',
   '/images/die-4.png', '/images/die-5.png', '/images/die-6.png',
   '/images/red.png', '/images/brown.png', '/images/yellow.png',
   '/images/green.png', '/images/blue.png', '/images/purple.png',
-  '/images/wood.png',
+  '/images/wood.png', '/images/frame-wood.png',
   '/icons/icon-192.png', '/icons/icon-512.png',
   '/sounds/dice-roll.mp3', '/sounds/move.mp3', '/sounds/snake.mp3',
   '/sounds/ladder.mp3', '/sounds/win.mp3', '/sounds/music.mp3',
