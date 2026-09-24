@@ -530,6 +530,21 @@ body {
 
 /* ======= 9) TOKENS (per-player colors) ======= */
 
+/* 3D token layer (tokens3d.js): a transparent WebGL canvas over the board.
+ * It bleeds 6% past the wrapper on every side so pawns on the start pen and
+ * the top row (and their shadows) are never clipped. Sits above the grid,
+ * ignores pointer events. */
+.token-layer {
+  position: absolute;
+  left: -6%;
+  top: -6%;
+  width: 112%;
+  height: 112%;
+  z-index: 5;
+  pointer-events: none;
+  display: block;
+}
+
 .token {
   position: absolute;
   width: var(--token-size, 22px);

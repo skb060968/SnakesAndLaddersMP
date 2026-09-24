@@ -20,7 +20,8 @@
  *   - renderPositions(state, localIdx) — fills the positions list
  */
 
-import { BOARD_SIZE, TOTAL, SNAKES, LADDERS } from './engine.js';
+import { BOARD_SIZE, TOTAL } from './engine.js';
+import * as tokens3d from './tokens3d.js';
 
 const BOARD_SKINS = [
   '/images/board2.png',
@@ -200,16 +201,10 @@ export function setBoardSkin(index) {
 
 export function getBoardIndex() { return currentBoardIndex; }
 
+/** Last positions handed to placeTokens — re-applied after a board skin change. */
+let _lastPositions = null;
 function readCurrentPositions() {
-  // Read positions back from DOM tokens — used after board skin change.
-  // Note: 0 is a valid position (virtual square 0, off-board pen), so we
-  // can't use `|| 1` here — that would silently drag pen tokens to sq 1.
-  const tokens = document.querySelectorAll('.token');
-  if (!tokens.length) return null;
-  return Array.from(tokens).map((t) => {
-    const v = parseInt(t.dataset.position, 10);
-    return Number.isFinite(v) ? v : 0;
-  });
+  return _lastPositions ? _lastPositions.slice() : null;
 }
 
 /* ======= GRID ======= */
@@ -274,25 +269,77 @@ function getCellCenter(cellNumber) {
 /* ======= TOKENS ======= */
 
 /**
- * Creates N tokens (idx 0..N-1) inside #board-wrapper.
- * Idempotent — removes any existing tokens first.
- * @param {string[]} colors — array of color ids per player ('red'|'orange'|...)
+ * Creates N 3D pawns (idx 0..N-1) on the token layer over #board-wrapper.
+ * Idempotent — replaces any existing pawns.
+ * @param {string[]} colors — array of color ids per player ('red'|'brown'|...)
  */
 export function createTokens(colors) {
   const wrapper = document.getElementById('board-wrapper');
   if (!wrapper) return;
-  // Remove any existing tokens
-  wrapper.querySelectorAll('.token').forEach((t) => t.remove());
-  const playerCount = colors.length;
-  for (let i = 0; i < playerCount; i++) {
-    const t = document.createElement('div');
-    t.id = `token${i}`;
-    t.className = 'token';
-    t.dataset.color = colors[i] || 'red';
-    t.dataset.position = '0';
-    t.setAttribute('aria-label', `Player ${i + 1} token`);
-    wrapper.appendChild(t);
+  wrapper.querySelectorAll('.token').forEach((t) => t.remove());   // legacy DOM tokens
+  if (!tokens3d.mount(wrapper)) return;
+  tokens3d.setTokens(colors.map((c) => c || 'red'));
+  _lastPositions = colors.map(() => 0);
+}
+
+function currentTokenSize() {
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--token-size')) || 22;
+}
+
+/**
+ * Pixel centre (wrapper-relative) for every token given a positions array,
+ * including the 2/3/4 stacking offsets for tokens sharing a square.
+ */
+function computeTokenTargets(positions) {
+  const tokenSize = currentTokenSize();
+  // Half-step offset: ~38% of token size keeps them touching but distinct
+  const d = tokenSize * 0.38;
+
+  // Group ALL players (including pen players at position 0) by cell so that
+  // tokens stacked at virtual square 0 also receive 2/3/4-token offsets.
+  const cellGroups = new Map(); // cell -> [playerIdx,...]
+  positions.forEach((pos, i) => {
+    const key = pos < 1 ? 0 : pos;
+    if (!cellGroups.has(key)) cellGroups.set(key, []);
+    cellGroups.get(key).push(i);
+  });
+
+  // Virtual square 0 centre: one cell-width to the left of square 1.
+  let virtualZeroCenter = null;
+  if (cellGroups.has(0)) {
+    const c1 = getCellCenter(1);
+    const gridEl = document.getElementById('grid');
+    const cell1 = gridEl ? gridEl.querySelector('[data-cell="1"]') : null;
+    const cellW = cell1 ? cell1.getBoundingClientRect().width : 0;
+    virtualZeroCenter = { x: c1.x - cellW, y: c1.y };
   }
+
+  return positions.map((pos, i) => {
+    const groupKey = pos < 1 ? 0 : pos;
+    const center = groupKey === 0 ? virtualZeroCenter : getCellCenter(pos);
+    if (!center) return null;
+    const group = cellGroups.get(groupKey) || [i];
+    const idxInGroup = group.indexOf(i);
+    const groupSize = group.length;
+    let dx = 0, dy = 0;
+    if (groupSize === 2) {
+      dx = idxInGroup === 0 ? -d : d;
+    } else if (groupSize === 3) {
+      const offsets = [{ x: -d, y: -d * 0.6 }, { x: d, y: -d * 0.6 }, { x: 0, y: d * 0.7 }];
+      dx = offsets[idxInGroup].x;
+      dy = offsets[idxInGroup].y;
+    } else if (groupSize >= 4) {
+      const offsets = [
+        { x: -d, y: -d },
+        { x:  d, y: -d },
+        { x: -d, y:  d },
+        { x:  d, y:  d },
+      ];
+      dx = offsets[idxInGroup].x;
+      dy = offsets[idxInGroup].y;
+    }
+    return { x: center.x + dx, y: center.y + dy };
+  });
 }
 
 /**
@@ -309,77 +356,46 @@ export function createTokens(colors) {
  * board with their first roll. All tokens with position 0 are stacked together
  * at virtual square 0 using the same group offset logic as on-board cells.
  *
+ * Snaps every pawn into place. Pass `hopIdx` to make that one pawn hop to its
+ * new square (260 ms arc) while any others whose stacking changed glide over.
+ *
  * @param {number[]} positions — array of position numbers per player
+ * @param {{hopIdx?: number}} [opts]
+ * @returns {Promise<void>} resolves when the hop (if any) lands
  */
-export function placeTokens(positions) {
+export function placeTokens(positions, opts = {}) {
   const wrapper = document.getElementById('board-wrapper');
-  if (!wrapper) return;
+  if (!wrapper) return Promise.resolve();
+  const tokenSize = currentTokenSize();
+  tokens3d.setTokenSize(tokenSize);
+  _lastPositions = positions.slice();
 
-  // Read current cell size (token size CSS var) to derive proportional offsets
-  const tokenSize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--token-size')) || 22;
-  // Half-step offset: ~38% of token size keeps them touching but distinct
-  const d = tokenSize * 0.38;
-
-  // Group ALL players (including pen players at position 0) by cell so that
-  // tokens stacked at virtual square 0 also receive 2/3/4-token offsets.
-  // We use cell key 0 for the virtual pen.
-  const cellGroups = new Map(); // cell -> [playerIdx,...]
-  positions.forEach((pos, i) => {
-    const key = pos < 1 ? 0 : pos;
-    if (!cellGroups.has(key)) cellGroups.set(key, []);
-    cellGroups.get(key).push(i);
-  });
-
-  // Pre-compute virtual square 0 center: one cell-width to the left of square 1.
-  let virtualZeroCenter = null;
-  if (cellGroups.has(0)) {
-    const c1 = getCellCenter(1);
-    const gridEl = document.getElementById('grid');
-    const cell1 = gridEl ? gridEl.querySelector('[data-cell="1"]') : null;
-    const cellW = cell1 ? cell1.getBoundingClientRect().width : 0;
-    virtualZeroCenter = { x: c1.x - cellW, y: c1.y };
-  }
-
-  positions.forEach((pos, i) => {
-    const tok = document.getElementById(`token${i}`);
-    if (!tok) return;
-
-    const groupKey = pos < 1 ? 0 : pos;
-    const center = groupKey === 0 ? virtualZeroCenter : getCellCenter(pos);
-    if (!center) return;
-
-    const group = cellGroups.get(groupKey) || [i];
-    const idxInGroup = group.indexOf(i);
-    const groupSize = group.length;
-
-    let dx = 0, dy = 0;
-    if (groupSize === 2) {
-      dx = idxInGroup === 0 ? -d : d;
-      dy = 0;
-    } else if (groupSize === 3) {
-      const offsets = [{ x: -d, y: -d * 0.6 }, { x: d, y: -d * 0.6 }, { x: 0, y: d * 0.7 }];
-      dx = offsets[idxInGroup].x;
-      dy = offsets[idxInGroup].y;
-    } else if (groupSize >= 4) {
-      const offsets = [
-        { x: -d, y: -d },
-        { x:  d, y: -d },
-        { x: -d, y:  d },
-        { x:  d, y:  d },
-      ];
-      dx = offsets[idxInGroup].x;
-      dy = offsets[idxInGroup].y;
+  const targets = computeTokenTargets(positions);
+  let hop = Promise.resolve();
+  targets.forEach((t, i) => {
+    if (!t) return;
+    if (opts.hopIdx === i) {
+      hop = tokens3d.moveToken(i, t.x, t.y, { duration: 260, hop: tokenSize * 0.9 });
+    } else if (opts.hopIdx != null) {
+      tokens3d.moveToken(i, t.x, t.y, { duration: 200 });
+    } else {
+      tokens3d.moveToken(i, t.x, t.y);
     }
-    tok.style.left = `${center.x + dx}px`;
-    tok.style.top = `${center.y + dy}px`;
-    tok.dataset.position = String(pos);
   });
+  return hop;
 }
 
 export function highlightActiveToken(activeIdx) {
-  document.querySelectorAll('.token').forEach((t, i) => {
-    t.classList.toggle('token-active', i === activeIdx);
-  });
+  tokens3d.setActiveToken(activeIdx);
+}
+
+/**
+ * One-off token feedback used by main.js for outcomes that don't move the
+ * token: 'penalty' (three sixes) or 'jump' (rolled a six).
+ * @returns {Promise<void>}
+ */
+export function setTokenEffect(idx, kind) {
+  return tokens3d.playEffect(idx, kind);
 }
 
 /* ======= DICE ======= */
@@ -415,141 +431,70 @@ export function resetDice() {
 
 /* ======= TOKEN ANIMATION ======= */
 
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
 /**
- * Animates a token stepping forward N squares one at a time.
- * Tokens at position 0 (virtual square 0, just left of square 1) hop onto
- * square 1 with the same animation as any other step. Updates DOM only —
- * caller is responsible for syncing engine state.
+ * Animates a token stepping forward N squares one at a time (one hop every
+ * 300 ms, move sound per hop). Tokens at position 0 hop onto square 1 like any
+ * other step. Mutates currentPositions — caller syncs engine state.
  * @returns {Promise<void>}
  */
-export function animateSteps(playerIdx, steps, currentPositions) {
-  return new Promise((resolve) => {
-    if (steps <= 0) { resolve(); return; }
-    const tok = document.getElementById(`token${playerIdx}`);
-    if (!tok) { resolve(); return; }
-
-    let count = 0;
-    const tick = setInterval(() => {
-      count++;
-      currentPositions[playerIdx] = Math.min(TOTAL, currentPositions[playerIdx] + 1);
-      tok.classList.remove('slide');
-      void tok.offsetWidth;
-      tok.classList.add('slide');
-      playSound('move');
-      placeTokens(currentPositions);
-      if (count >= steps) {
-        clearInterval(tick);
-        // Only the final hop onto square 100 needs an extra pause: its CSS
-        // transition (260ms) gets cut off when handleWin swaps to the
-        // results screen immediately. Non-winning moves resolve right away
-        // so the next turn starts without a noticeable delay.
-        if (currentPositions[playerIdx] === TOTAL) {
-          setTimeout(resolve, 320);
-        } else {
-          resolve();
-        }
-      }
-    }, 300);
-  });
+export async function animateSteps(playerIdx, steps, currentPositions) {
+  if (steps <= 0) return;
+  for (let s = 0; s < steps; s += 1) {
+    currentPositions[playerIdx] = Math.min(TOTAL, currentPositions[playerIdx] + 1);
+    playSound('move');
+    await placeTokens(currentPositions, { hopIdx: playerIdx });
+    await wait(40);
+  }
+  // The final hop onto 100 gets a short settle before handleWin swaps screens.
+  if (currentPositions[playerIdx] === TOTAL) await wait(320);
 }
 
 /**
- * Animates a snake or ladder slide from current to target square.
+ * Snake or ladder: 500 ms hit cue (red ring + shake / gold ring + bounce), then
+ * the token arcs from its square to the target square and settles into its
+ * stacking slot there.
  * @param {'snake'|'ladder'} type
  * @returns {Promise<void>}
  */
-export function animateSnakeOrLadder(playerIdx, targetCell, type, currentPositions) {
-  return new Promise((resolve) => {
-    const tok = document.getElementById(`token${playerIdx}`);
-    if (!tok) { resolve(); return; }
-    const startCell = currentPositions[playerIdx];
-    const start = getCellCenter(startCell);
-    const end = getCellCenter(targetCell);
-    if (type === 'ladder') playSound('ladder');
-    else playSound('snake');
+export async function animateSnakeOrLadder(playerIdx, targetCell, type, currentPositions) {
+  playSound(type === 'ladder' ? 'ladder' : 'snake');
+  await tokens3d.playEffect(playerIdx, type === 'snake' ? 'snake-hit' : 'ladder-hit');
 
-    const hitClass = type === 'snake' ? 'snake-hit' : 'ladder-hit';
-    tok.classList.add(hitClass);
-    const hitDuration = 500;
-
-    setTimeout(() => {
-      tok.classList.remove(hitClass);
-      const frames = 20;
-      let frame = 0;
-      const jump = setInterval(() => {
-        frame++;
-        const t = frame / frames;
-        const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-        const x = start.x + (end.x - start.x) * ease;
-        const y = start.y + (end.y - start.y) * ease;
-        const lift = Math.sin(Math.PI * t) * 18;
-        tok.style.left = `${x}px`;
-        tok.style.top = `${y - lift}px`;
-        if (frame >= frames) {
-          clearInterval(jump);
-          currentPositions[playerIdx] = targetCell;
-          placeTokens(currentPositions);
-          resolve();
-        }
-      }, 22);
-    }, hitDuration);
+  const tokenSize = currentTokenSize();
+  currentPositions[playerIdx] = targetCell;
+  _lastPositions = currentPositions.slice();
+  const targets = computeTokenTargets(currentPositions);
+  targets.forEach((t, i) => {
+    if (!t || i === playerIdx) return;
+    tokens3d.moveToken(i, t.x, t.y, { duration: 200 });
   });
+  const dest = targets[playerIdx];
+  if (dest) await tokens3d.moveToken(playerIdx, dest.x, dest.y, { duration: 440, hop: tokenSize * 1.2 });
 }
 
 /**
- * Animates a token being captured and sent back to position 0 (start).
- * Shows penalty glow effect while the token flies back.
- * @param {number} capturedPlayerIdx - Index of the captured player
- * @param {Array<number>} currentPositions - Current positions array for animation tracking
+ * Captured token: red ring flash while it flies back to the start pen.
+ * @param {number} capturedPlayerIdx
+ * @param {number[]} currentPositions
  * @returns {Promise<void>}
  */
-export function animateCaptureToken(capturedPlayerIdx, currentPositions) {
-  return new Promise((resolve) => {
-    const tok = document.getElementById(`token${capturedPlayerIdx}`);
-    if (!tok) { resolve(); return; }
+export async function animateCaptureToken(capturedPlayerIdx, currentPositions) {
+  if (currentPositions[capturedPlayerIdx] === 0) return;   // already at start
+  const tokenSize = currentTokenSize();
+  const glow = tokens3d.playEffect(capturedPlayerIdx, 'penalty');
 
-    const startPos = currentPositions[capturedPlayerIdx];
-    if (startPos === 0) { resolve(); return; } // Already at start
-
-    // Apply penalty glow effect
-    tok.classList.add('penalty');
-
-    // Get start and end positions for animation
-    const start = getCellCenter(startPos);
-    // Virtual square 0 is one cell-width to the left of square 1
-    const c1 = getCellCenter(1);
-    const gridEl = document.getElementById('grid');
-    const cell1 = gridEl ? gridEl.querySelector('[data-cell="1"]') : null;
-    const cellW = cell1 ? cell1.getBoundingClientRect().width : 0;
-    const end = { x: c1.x - cellW, y: c1.y };
-
-    // Animate the token flying back to position 0
-    const frames = 30; // Longer animation for visibility
-    let frame = 0;
-    const flyBack = setInterval(() => {
-      frame++;
-      const t = frame / frames;
-      // Ease-in-out for smooth motion
-      const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-      const x = start.x + (end.x - start.x) * ease;
-      const y = start.y + (end.y - start.y) * ease;
-      // Add a slight arc to the movement
-      const arc = Math.sin(Math.PI * t) * 20;
-      tok.style.left = `${x}px`;
-      tok.style.top = `${y - arc}px`;
-
-      if (frame >= frames) {
-        clearInterval(flyBack);
-        // Remove penalty effect after animation completes
-        setTimeout(() => {
-          tok.classList.remove('penalty');
-        }, 300);
-        currentPositions[capturedPlayerIdx] = 0;
-        placeTokens(currentPositions);
-        resolve();
-      }
-    }, 25); // 30 frames * 25ms = 750ms total animation
+  currentPositions[capturedPlayerIdx] = 0;
+  _lastPositions = currentPositions.slice();
+  const targets = computeTokenTargets(currentPositions);
+  targets.forEach((t, i) => {
+    if (!t || i === capturedPlayerIdx) return;
+    tokens3d.moveToken(i, t.x, t.y, { duration: 200 });
   });
+  const dest = targets[capturedPlayerIdx];
+  if (dest) await tokens3d.moveToken(capturedPlayerIdx, dest.x, dest.y, { duration: 750, hop: tokenSize * 1.4 });
+  await glow;
 }
 
 /* ======= MESSAGE / TURN / POSITIONS ======= */
