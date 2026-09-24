@@ -48,11 +48,14 @@ import {
   placeTokens,
   updateTokenSize,
   highlightActiveToken,
-  throwDiceVisual,
-  resetDice,
   animateSteps,
   animateSnakeOrLadder,
   animateCaptureToken,
+  setTokenEffect,
+} from './board3d.js';
+import {
+  throwDiceVisual,
+  resetDice,
   playSound,
   setMessage,
   setTurn,
@@ -921,6 +924,7 @@ function renderUI() {
   highlightActiveToken(state.currentPlayerIndex);
 
   const isMyTurn = state.currentPlayerIndex === localStateIndex();
+  const cur = state.players?.[state.currentPlayerIndex];
   const curColor = cur?.color || 'red';
   setRollButtonState(isMyTurn && !_isAnimating, curColor);
 
@@ -1021,7 +1025,6 @@ async function runOutcomeAnimation(outcome) {
   // Snapshot positions from current state for animation tracking
   const positions = state.players.map((p) => p.position);
   const idx = outcome.by;
-  const tok = document.getElementById(`token${idx}`);
 
   switch (outcome.kind) {
     case 'overshoot':
@@ -1030,19 +1033,13 @@ async function runOutcomeAnimation(outcome) {
       break;
 
     case 'three-sixes':
-      if (tok) {
-        tok.classList.add('penalty');
-        setTimeout(() => tok.classList.remove('penalty'), 1500);
-      }
+      setTokenEffect(idx, 'penalty');
       setMessage(`⚠️ ${state.players[idx].name} rolled three sixes! Turn skipped.`);
       await new Promise((r) => setTimeout(r, 1200));
       break;
 
     case 'six-bonus':
-      if (tok) {
-        tok.classList.add('jump');
-        setTimeout(() => tok.classList.remove('jump'), 600);
-      }
+      setTokenEffect(idx, 'jump');
       setMessage(`🎁 ${state.players[idx].name} rolled a 6, roll again!`);
       await new Promise((r) => setTimeout(r, 700));
       break;
