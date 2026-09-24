@@ -25,9 +25,9 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-const ELEV = THREE.MathUtils.degToRad(60);   // camera elevation above the board (90 = top-down disc, lower = more profile)
+const ELEV = THREE.MathUtils.degToRad(75);   // camera elevation above the board (90 = top-down disc, lower = more profile)
 const SIN = Math.sin(ELEV);
-const PAWN_H = 2.2;                          // pawn height in token-size units
+const PAWN_H = 2.4;                          // pawn height in token-size units
 const BASE_DOWN = 0.2;                      // base sits below the cell centre so the visible mass is centred
 const CANVAS_BLEED = 0.06;                   // canvas extends 6% past the wrapper on every side (see style.css)
 
