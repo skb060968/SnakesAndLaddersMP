@@ -153,11 +153,11 @@
         <aside class="control-column" aria-label="Game controls and status">
           <header class="panel-header">
             <h1 class="title">🐍Snakes &amp; Ladders🪜</h1>
-            <div id="turn" class="turn">Player 1's Turn</div>
           </header>
 
           <section class="dice-panel" aria-label="Dice">
-            <!-- classic CSS cube on the left; the 3D die (dice3d.js) tumbles in over this panel and settles centre -->
+            <!-- One dice is shown: the classic CSS cube, or the 3D die (dice3d.js) drawn on a canvas
+                 over this panel. The 🎲 button beside Roll picks which (saved per device). -->
             <div class="dice-stage">
               <div id="dice-cube" class="dice-cube" role="img" aria-label="Dice">
                 <div class="die-face face1"></div>
@@ -172,12 +172,13 @@
 
           <section class="controls-row">
             <div class="roll-buttons">
-              <button id="roll-btn" class="btn primary" type="button" aria-label="Roll the classic dice">🎲 Roll</button>
-              <button id="roll-3d-btn" class="btn primary" type="button" aria-label="Roll the 3D dice">Roll 3D</button>
+              <button id="roll-btn" class="btn primary" type="button" aria-label="Roll the dice">Roll Dice</button>
+              <button id="dice-toggle-btn" class="btn secondary dice-toggle" type="button" aria-label="Change dice style" title="Change dice style">🎲</button>
             </div>
           </section>
 
           <section class="status-row" aria-label="Positions and messages">
+            <div id="turn" class="turn">Player 1's Turn</div>
             <div id="positions" class="positions"></div>
             <p id="message" class="message" role="status" aria-live="polite">Ready</p>
           </section>

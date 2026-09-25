@@ -49,6 +49,7 @@ import {
   updateTokenSize,
   highlightActiveToken,
   throwDice,
+  toggleDiceMode,
   resetDice,
   animateSteps,
   animateSnakeOrLadder,
@@ -859,17 +860,17 @@ function startGame() {
     });
   });
 
-  // Wire the two roll buttons (idempotent — re-wires safely): classic cube or 3D die,
-  // the roller's pick for this turn; everyone else sees the same dice they chose.
+  // Wire roll button (idempotent — re-wires safely)
   const rollBtn = document.getElementById('roll-btn');
   if (rollBtn && !rollBtn._wired) {
     rollBtn._wired = true;
-    rollBtn.addEventListener('click', () => handleRoll('css'));
+    rollBtn.addEventListener('click', handleRoll);
   }
-  const roll3dBtn = document.getElementById('roll-3d-btn');
-  if (roll3dBtn && !roll3dBtn._wired) {
-    roll3dBtn._wired = true;
-    roll3dBtn.addEventListener('click', () => handleRoll('3d'));
+  // Dice style picker (classic cube ↔ 3D die), a per-device preference like the board skin
+  const diceBtn = document.getElementById('dice-toggle-btn');
+  if (diceBtn && !diceBtn._wired) {
+    diceBtn._wired = true;
+    diceBtn.addEventListener('click', () => { if (!_isAnimating) toggleDiceMode(); });
   }
 
   // Wire board toggle (idempotent)
@@ -941,8 +942,7 @@ function renderUI() {
 
 /* ======= ROLL HANDLER ======= */
 
-/** @param {'css'|'3d'} dice which dice animation the roller picked */
-async function handleRoll(dice = 'css') {
+async function handleRoll() {
   if (!state || state.status !== 'playing') return;
   if (state.currentPlayerIndex !== localStateIndex()) return;
   if (_isAnimating) return;
@@ -980,7 +980,6 @@ async function handleRoll(dice = 'css') {
     capturedPlayer: outcome.capturedPlayer,
     capturedPlayerKey: captured?.slotKey,
     win: Boolean(outcome.win),
-    dice,
     timestamp: moveTimestamp,
   };
 
@@ -1002,7 +1001,7 @@ async function handleRoll(dice = 'css') {
 
   // Local animation
   playSound('roll');
-  await throwDice(roll, dice);
+  await throwDice(roll);
 
   // Drive animations based on outcome kind
   await runOutcomeAnimation(outcome);
@@ -1167,7 +1166,7 @@ async function handleRemoteUpdate(gameData, lastMove) {
   try {
     setMessage(`${state.players[rollerIndex]?.name || 'Opponent'} rolled ${lastMove.roll}`);
     playSound('roll');
-    await throwDice(lastMove.roll, lastMove.dice === '3d' ? '3d' : 'css');
+    await throwDice(lastMove.roll);
     await runOutcomeAnimation({
       kind: lastMove.kind,
       by: rollerIndex,

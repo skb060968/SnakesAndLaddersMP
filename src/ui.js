@@ -435,36 +435,70 @@ export function throwDiceVisual(finalValue) {
   }, 360);
 }
 
+/* ----- dice style: a per-device preference, like the board skin ----- */
+
+const DICE_KEY = 'snl_mp_dice';
+const DICE_MODES = ['css', '3d'];
+let diceMode = 'css';
+let lastDiceValue = 1;
+try {
+  const saved = localStorage.getItem(DICE_KEY);
+  if (DICE_MODES.includes(saved)) diceMode = saved;
+} catch (_) {}
+
+export function getDiceMode() { return diceMode; }
+
+/** Switch between the classic cube ('css') and the 3D die ('3d') and show that one at rest. */
+export function setDiceMode(mode) {
+  diceMode = DICE_MODES.includes(mode) ? mode : 'css';
+  try { localStorage.setItem(DICE_KEY, diceMode); } catch (_) {}
+  applyDiceMode();
+}
+
+export function toggleDiceMode() {
+  setDiceMode(diceMode === '3d' ? 'css' : '3d');
+  return diceMode;
+}
+
+function applyDiceMode() {
+  const stage = document.querySelector('.dice-stage');
+  const panel = document.querySelector('.dice-panel');
+  let use3d = diceMode === '3d';
+  if (use3d && !(panel && dice3d.mount(panel))) use3d = false;   // no WebGL: stay on the cube
+  if (stage) stage.hidden = use3d;
+  if (use3d) dice3d.showDie(lastDiceValue); else dice3d.hideDie();
+  const btn = document.getElementById('dice-toggle-btn');
+  if (btn) {
+    btn.textContent = use3d ? '🎲' : '⬜';
+    btn.title = use3d ? 'Dice: 3D — tap for classic' : 'Dice: classic — tap for 3D';
+    btn.setAttribute('aria-label', btn.title);
+  }
+}
+
 export function resetDice() {
   const diceCube = document.getElementById('dice-cube');
   if (diceCube) diceCube.style.transform = 'none';
-  dice3d.hideDie();
+  lastDiceValue = 1;
+  applyDiceMode();
 }
 
 /** Length of the CSS cube's roll (360 ms toss + 720 ms settle + a beat). */
 export const CSS_DICE_MS = 1150;
 
 /**
- * Rolls the 3D die: it tumbles in from the right of the control panel and settles
- * in the centre showing `value`. Falls back to the CSS cube if WebGL is unavailable.
- * @returns {Promise<void>} resolves when the die has settled
+ * Rolls the dice this device has chosen and waits for it to settle. The 3D die tumbles
+ * in from the right of the control panel and stops in the centre; falls back to the
+ * cube if WebGL is unavailable.
+ * @returns {Promise<void>}
  */
-export function throwDice3D(value) {
+export function throwDice(value) {
+  lastDiceValue = value;
   const panel = document.querySelector('.dice-panel');
-  if (!panel || !dice3d.mount(panel)) {
-    throwDiceVisual(value);
-    return new Promise((r) => setTimeout(r, CSS_DICE_MS));
+  if (diceMode === '3d' && panel && dice3d.mount(panel)) {
+    const stage = document.querySelector('.dice-stage');
+    if (stage) stage.hidden = true;
+    return dice3d.throwDie(value);
   }
-  return dice3d.throwDie(value);
-}
-
-/**
- * Plays whichever dice the roller chose and waits for it.
- * @param {number} value
- * @param {'css'|'3d'} [mode]
- */
-export function throwDice(value, mode) {
-  if (mode === '3d') return throwDice3D(value);
   throwDiceVisual(value);
   return new Promise((r) => setTimeout(r, CSS_DICE_MS));
 }
@@ -620,13 +654,10 @@ export function setActiveSpeakers(slotKeys = []) {
 
 /* ======= ROLL BUTTON HELPERS ======= */
 
-/** Both roll buttons (classic cube on the left, 3D die on the right) share one state. */
 export function setRollButtonState(enabled, color) {
-  ['roll-btn', 'roll-3d-btn'].forEach((id) => {
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    btn.disabled = !enabled;
-    btn.classList.remove('color-red', 'color-brown', 'color-yellow', 'color-green', 'color-blue', 'color-purple');
-    if (color) btn.classList.add(`color-${color}`);
-  });
+  const btn = document.getElementById('roll-btn');
+  if (!btn) return;
+  btn.disabled = !enabled;
+  btn.classList.remove('color-red', 'color-brown', 'color-yellow', 'color-green', 'color-blue', 'color-purple');
+  if (color) btn.classList.add(`color-${color}`);
 }

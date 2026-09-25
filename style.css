@@ -677,24 +677,25 @@ body {
   margin-top: 0;
   font-family: Georgia, serif;
 }
+/* Turn line now leads the status block (above the positions), so nothing sits over the dice. */
 #gameplay .turn {
-  margin-top: 4px;
+  margin: 0 0 6px;
   font-size: 0.95rem;
   font-weight: 800;
 }
 
-/* Dice — the panel spans the control column: classic CSS cube parked on the left, and
-   the 3D die (dice3d.js, a transparent WebGL canvas over the whole panel) tumbles in from
-   the right edge and settles in the centre. */
+/* Dice — one dice sits centred at the top of the control column: either the classic CSS
+   cube, or the 3D die (dice3d.js) on a transparent WebGL canvas. The canvas bleeds well
+   past the panel on every side so the throw arc and the run-in from the right edge are
+   never clipped; it ignores pointer events. */
 .dice-panel {
   position: relative;
   width: 100%;
   max-width: 340px;
   height: 90px;
   display: flex;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: center;
-  padding-left: 12px;
   box-sizing: border-box;
 }
 
@@ -705,28 +706,39 @@ body {
   background-color: transparent;
   flex-shrink: 0;
 }
+.dice-stage[hidden] { display: none; }
 
 .dice3d-layer {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  left: -20%;
+  top: -80%;
+  width: 140%;
+  height: 240%;
   display: block;
   pointer-events: none;
+  z-index: 3;
 }
 
-/* Two roll buttons side by side: classic (left) and 3D (right). */
+/* Roll button with the small dice-style picker beside it. */
 .roll-buttons {
   width: 100%;
   max-width: 340px;
   display: flex;
-  gap: 10px;
+  gap: 8px;
+  align-items: stretch;
 }
-.roll-buttons .btn {
+.roll-buttons .btn.primary {
   flex: 1 1 0;
   max-width: none;
   min-width: 0;
-  white-space: nowrap;
+}
+.roll-buttons .dice-toggle {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+  padding: 10px 12px;
+  font-size: 1.15rem;
+  line-height: 1;
 }
 
 .dice-cube {
