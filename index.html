@@ -156,7 +156,8 @@
             <div id="turn" class="turn">Player 1's Turn</div>
           </header>
 
-          <section class="dice-panel" aria-label="3D dice">
+          <section class="dice-panel" aria-label="Dice">
+            <!-- classic CSS cube on the left; the 3D die (dice3d.js) tumbles in over this panel and settles centre -->
             <div class="dice-stage">
               <div id="dice-cube" class="dice-cube" role="img" aria-label="Dice">
                 <div class="die-face face1"></div>
@@ -170,7 +171,10 @@
           </section>
 
           <section class="controls-row">
-            <button id="roll-btn" class="btn primary" type="button" aria-label="Roll the dice">Roll Dice</button>
+            <div class="roll-buttons">
+              <button id="roll-btn" class="btn primary" type="button" aria-label="Roll the classic dice">🎲 Roll</button>
+              <button id="roll-3d-btn" class="btn primary" type="button" aria-label="Roll the 3D dice">Roll 3D</button>
+            </div>
           </section>
 
           <section class="status-row" aria-label="Positions and messages">

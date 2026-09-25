@@ -246,7 +246,7 @@ export function setTokens(colorIds) {
     group.add(mesh, ring);
     group.name = `token${i}`;
     scene.add(group);
-    pawns.push({ group, mesh, ring, ringMat, px: 0, py: 0, move: null, effect: null });
+    pawns.push({ group, mesh, ring, ringMat, px: 0, py: 0, crowd: 1, move: null, effect: null });
   });
   applyScale();
 }
@@ -258,10 +258,12 @@ export function setTokenSize(px) {
   applyScale();
 }
 
+/** Full pawn height in world units for pawn p (its crowd factor applied). */
+const pawnH = (p) => tokenPx * PAWN_H * (p.crowd ?? 1);
+
 function applyScale() {
-  const h = tokenPx * PAWN_H;
   pawns.forEach((p) => {
-    p.mesh.scale.set(h, h, h);
+    p.mesh.scale.setScalar(pawnH(p));
     p.ring.scale.set(tokenPx * 1.5, tokenPx * 1.5, tokenPx * 0.9);
     toWorld(p.px, p.py + BASE_DOWN * tokenPx, p.group.position);
   });
@@ -272,28 +274,40 @@ function applyScale() {
  * it glides there, lifting by `hop` px at mid-flight. A move that arrives while
  * another is in progress takes over from the pawn's current spot.
  */
-export function moveToken(idx, x, y, { duration = 0, hop = 0 } = {}) {
+export function moveToken(idx, x, y, { duration = 0, hop = 0, crowd = 1 } = {}) {
   const p = pawns[idx];
   if (!p) return Promise.resolve();
   p.px = x; p.py = y;
   if (p.move) { cancelTween(p.move.handle); p.move = null; }
   const target = toWorld(x, y + BASE_DOWN * tokenPx);
+  const h0 = p.mesh.scale.y;                 // current height (may be mid-stretch or a different crowd)
+  p.crowd = crowd;
+  const h1 = pawnH(p);
   if (duration <= 0) {
     p.group.position.copy(target);
+    p.mesh.scale.setScalar(h1);
     return Promise.resolve();
   }
   const from = p.group.position.clone();
   from.y = 0;
+  // Already there and the right size (a stacking re-layout that didn't affect this pawn).
+  if (from.distanceToSquared(target) < 0.01 && Math.abs(h1 - h0) < 0.01) {
+    p.group.position.copy(target);
+    return Promise.resolve();
+  }
   const pr = tween(duration, (e, t) => {
     p.group.position.lerpVectors(from, target, e);
     p.group.position.y = Math.sin(Math.PI * t) * hop;
-    const s = 1 + 0.08 * Math.sin(Math.PI * t);
-    p.mesh.scale.set(tokenPx * PAWN_H / Math.sqrt(s), tokenPx * PAWN_H * s, tokenPx * PAWN_H / Math.sqrt(s));
+    const h = h0 + (h1 - h0) * e;              // grow/shrink smoothly as company changes
+    // Squash-and-stretch only when the pawn actually leaves the board; a flat glide
+    // (a neighbour shuffling over to make room) keeps its shape.
+    const s = hop > 0 ? 1 + 0.08 * Math.sin(Math.PI * t) : 1;
+    p.mesh.scale.set(h / Math.sqrt(s), h * s, h / Math.sqrt(s));
   });
   p.move = pr;
   return pr.then(() => {
     if (p.move === pr) p.move = null;
-    p.mesh.scale.setScalar(tokenPx * PAWN_H);
+    p.mesh.scale.setScalar(pawnH(p));
     if (p.px === x && p.py === y) p.group.position.copy(target);
   });
 }

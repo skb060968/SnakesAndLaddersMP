@@ -240,6 +240,8 @@ function normalizeMove(move, roundId, revision) {
   if (move.snakeLadderTo != null) normalized.snakeLadderTo = move.snakeLadderTo;
   if (move.capturedPlayer != null) normalized.capturedPlayer = move.capturedPlayer;
   if (move.capturedPlayerKey) normalized.capturedPlayerKey = move.capturedPlayerKey;
+  // Which dice animation the roller used ('css' classic cube | '3d'); others replay the same.
+  if (move.dice === '3d' || move.dice === 'css') normalized.dice = move.dice;
   return normalized;
 }
 

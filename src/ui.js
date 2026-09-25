@@ -22,6 +22,7 @@
 
 import { BOARD_SIZE, TOTAL } from './engine.js';
 import * as tokens3d from './tokens3d.js';
+import * as dice3d from './dice3d.js';
 
 const BOARD_SKINS = [
   '/images/board2.png',
@@ -292,8 +293,10 @@ function currentTokenSize() {
  */
 function computeTokenTargets(positions) {
   const tokenSize = currentTokenSize();
-  // Half-step offset: ~38% of token size keeps them touching but distinct
-  const d = tokenSize * 0.38;
+  // Half-step offset. The 3D pawns have a base ~1.5 token-sizes wide (the old discs were
+  // 1.0), so pawns sharing a square are spread further apart AND shrunk (see `crowd`
+  // below, applied by tokens3d) so they sit side by side instead of inside each other.
+  const d = tokenSize * 0.55;
 
   // Group ALL players (including pen players at position 0) by cell so that
   // tokens stacked at virtual square 0 also receive 2/3/4-token offsets.
@@ -304,13 +307,15 @@ function computeTokenTargets(positions) {
     cellGroups.get(key).push(i);
   });
 
-  // Virtual square 0 centre: one cell-width to the left of square 1.
-  let virtualZeroCenter = null;
+  // Virtual square 0: on the wooden frame, one cell-width to the left of square 1.
+  let virtualZeroCenter = null, cellH = 0;
   if (cellGroups.has(0)) {
     const c1 = getCellCenter(1);
     const gridEl = document.getElementById('grid');
     const cell1 = gridEl ? gridEl.querySelector('[data-cell="1"]') : null;
-    const cellW = cell1 ? cell1.getBoundingClientRect().width : 0;
+    const r = cell1 ? cell1.getBoundingClientRect() : null;
+    const cellW = r ? r.width : 0;
+    cellH = r ? r.height : 0;
     virtualZeroCenter = { x: c1.x - cellW, y: c1.y };
   }
 
@@ -321,6 +326,10 @@ function computeTokenTargets(positions) {
     const group = cellGroups.get(groupKey) || [i];
     const idxInGroup = group.indexOf(i);
     const groupSize = group.length;
+    // Waiting pawns queue up the left frame at FULL size, one per row starting beside
+    // square 1 (the frame has room; a square on the board does not). On the board itself
+    // two pawns only ever share a square for the moment before a capture sends one home.
+    if (groupKey === 0) return { x: center.x, y: center.y - idxInGroup * cellH, crowd: 1 };
     let dx = 0, dy = 0;
     if (groupSize === 2) {
       dx = idxInGroup === 0 ? -d : d;
@@ -338,7 +347,9 @@ function computeTokenTargets(positions) {
       dx = offsets[idxInGroup].x;
       dy = offsets[idxInGroup].y;
     }
-    return { x: center.x + dx, y: center.y + dy };
+    // Scale factor for a pawn sharing its square: 1 alone, smaller the more company it has.
+    const crowd = groupSize <= 1 ? 1 : groupSize === 2 ? 0.8 : groupSize === 3 ? 0.7 : 0.62;
+    return { x: center.x + dx, y: center.y + dy, crowd };
   });
 }
 
@@ -375,11 +386,11 @@ export function placeTokens(positions, opts = {}) {
   targets.forEach((t, i) => {
     if (!t) return;
     if (opts.hopIdx === i) {
-      hop = tokens3d.moveToken(i, t.x, t.y, { duration: 260, hop: tokenSize * 0.9 });
+      hop = tokens3d.moveToken(i, t.x, t.y, { duration: 260, hop: tokenSize * 0.9, crowd: t.crowd });
     } else if (opts.hopIdx != null) {
-      tokens3d.moveToken(i, t.x, t.y, { duration: 200 });
+      tokens3d.moveToken(i, t.x, t.y, { duration: 200, crowd: t.crowd });
     } else {
-      tokens3d.moveToken(i, t.x, t.y);
+      tokens3d.moveToken(i, t.x, t.y, { crowd: t.crowd });
     }
   });
   return hop;
@@ -427,6 +438,35 @@ export function throwDiceVisual(finalValue) {
 export function resetDice() {
   const diceCube = document.getElementById('dice-cube');
   if (diceCube) diceCube.style.transform = 'none';
+  dice3d.hideDie();
+}
+
+/** Length of the CSS cube's roll (360 ms toss + 720 ms settle + a beat). */
+export const CSS_DICE_MS = 1150;
+
+/**
+ * Rolls the 3D die: it tumbles in from the right of the control panel and settles
+ * in the centre showing `value`. Falls back to the CSS cube if WebGL is unavailable.
+ * @returns {Promise<void>} resolves when the die has settled
+ */
+export function throwDice3D(value) {
+  const panel = document.querySelector('.dice-panel');
+  if (!panel || !dice3d.mount(panel)) {
+    throwDiceVisual(value);
+    return new Promise((r) => setTimeout(r, CSS_DICE_MS));
+  }
+  return dice3d.throwDie(value);
+}
+
+/**
+ * Plays whichever dice the roller chose and waits for it.
+ * @param {number} value
+ * @param {'css'|'3d'} [mode]
+ */
+export function throwDice(value, mode) {
+  if (mode === '3d') return throwDice3D(value);
+  throwDiceVisual(value);
+  return new Promise((r) => setTimeout(r, CSS_DICE_MS));
 }
 
 /* ======= TOKEN ANIMATION ======= */
@@ -468,10 +508,10 @@ export async function animateSnakeOrLadder(playerIdx, targetCell, type, currentP
   const targets = computeTokenTargets(currentPositions);
   targets.forEach((t, i) => {
     if (!t || i === playerIdx) return;
-    tokens3d.moveToken(i, t.x, t.y, { duration: 200 });
+    tokens3d.moveToken(i, t.x, t.y, { duration: 200, crowd: t.crowd });
   });
   const dest = targets[playerIdx];
-  if (dest) await tokens3d.moveToken(playerIdx, dest.x, dest.y, { duration: 440, hop: tokenSize * 1.2 });
+  if (dest) await tokens3d.moveToken(playerIdx, dest.x, dest.y, { duration: 440, hop: tokenSize * 1.2, crowd: dest.crowd });
 }
 
 /**
@@ -490,10 +530,10 @@ export async function animateCaptureToken(capturedPlayerIdx, currentPositions) {
   const targets = computeTokenTargets(currentPositions);
   targets.forEach((t, i) => {
     if (!t || i === capturedPlayerIdx) return;
-    tokens3d.moveToken(i, t.x, t.y, { duration: 200 });
+    tokens3d.moveToken(i, t.x, t.y, { duration: 200, crowd: t.crowd });
   });
   const dest = targets[capturedPlayerIdx];
-  if (dest) await tokens3d.moveToken(capturedPlayerIdx, dest.x, dest.y, { duration: 750, hop: tokenSize * 1.4 });
+  if (dest) await tokens3d.moveToken(capturedPlayerIdx, dest.x, dest.y, { duration: 750, hop: tokenSize * 1.4, crowd: dest.crowd });
   await glow;
 }
 
@@ -580,10 +620,13 @@ export function setActiveSpeakers(slotKeys = []) {
 
 /* ======= ROLL BUTTON HELPERS ======= */
 
+/** Both roll buttons (classic cube on the left, 3D die on the right) share one state. */
 export function setRollButtonState(enabled, color) {
-  const btn = document.getElementById('roll-btn');
-  if (!btn) return;
-  btn.disabled = !enabled;
-  btn.classList.remove('color-red', 'color-brown', 'color-yellow', 'color-green', 'color-blue', 'color-purple');
-  if (color) btn.classList.add(`color-${color}`);
+  ['roll-btn', 'roll-3d-btn'].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = !enabled;
+    btn.classList.remove('color-red', 'color-brown', 'color-yellow', 'color-green', 'color-blue', 'color-purple');
+    if (color) btn.classList.add(`color-${color}`);
+  });
 }

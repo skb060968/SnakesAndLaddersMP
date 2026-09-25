@@ -683,10 +683,19 @@ body {
   font-weight: 800;
 }
 
-/* Dice */
+/* Dice — the panel spans the control column: classic CSS cube parked on the left, and
+   the 3D die (dice3d.js, a transparent WebGL canvas over the whole panel) tumbles in from
+   the right edge and settles in the centre. */
 .dice-panel {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  height: 90px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
+  align-items: center;
+  padding-left: 12px;
+  box-sizing: border-box;
 }
 
 .dice-stage {
@@ -694,6 +703,30 @@ body {
   height: 70px;
   perspective: 900px;
   background-color: transparent;
+  flex-shrink: 0;
+}
+
+.dice3d-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+/* Two roll buttons side by side: classic (left) and 3D (right). */
+.roll-buttons {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  gap: 10px;
+}
+.roll-buttons .btn {
+  flex: 1 1 0;
+  max-width: none;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .dice-cube {

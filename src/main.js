@@ -48,7 +48,7 @@ import {
   placeTokens,
   updateTokenSize,
   highlightActiveToken,
-  throwDiceVisual,
+  throwDice,
   resetDice,
   animateSteps,
   animateSnakeOrLadder,
@@ -859,11 +859,17 @@ function startGame() {
     });
   });
 
-  // Wire roll button (idempotent — re-wires safely)
+  // Wire the two roll buttons (idempotent — re-wires safely): classic cube or 3D die,
+  // the roller's pick for this turn; everyone else sees the same dice they chose.
   const rollBtn = document.getElementById('roll-btn');
   if (rollBtn && !rollBtn._wired) {
     rollBtn._wired = true;
-    rollBtn.addEventListener('click', handleRoll);
+    rollBtn.addEventListener('click', () => handleRoll('css'));
+  }
+  const roll3dBtn = document.getElementById('roll-3d-btn');
+  if (roll3dBtn && !roll3dBtn._wired) {
+    roll3dBtn._wired = true;
+    roll3dBtn.addEventListener('click', () => handleRoll('3d'));
   }
 
   // Wire board toggle (idempotent)
@@ -935,7 +941,8 @@ function renderUI() {
 
 /* ======= ROLL HANDLER ======= */
 
-async function handleRoll() {
+/** @param {'css'|'3d'} dice which dice animation the roller picked */
+async function handleRoll(dice = 'css') {
   if (!state || state.status !== 'playing') return;
   if (state.currentPlayerIndex !== localStateIndex()) return;
   if (_isAnimating) return;
@@ -973,6 +980,7 @@ async function handleRoll() {
     capturedPlayer: outcome.capturedPlayer,
     capturedPlayerKey: captured?.slotKey,
     win: Boolean(outcome.win),
+    dice,
     timestamp: moveTimestamp,
   };
 
@@ -994,8 +1002,7 @@ async function handleRoll() {
 
   // Local animation
   playSound('roll');
-  throwDiceVisual(roll);
-  await new Promise((r) => setTimeout(r, 1150));
+  await throwDice(roll, dice);
 
   // Drive animations based on outcome kind
   await runOutcomeAnimation(outcome);
@@ -1160,8 +1167,7 @@ async function handleRemoteUpdate(gameData, lastMove) {
   try {
     setMessage(`${state.players[rollerIndex]?.name || 'Opponent'} rolled ${lastMove.roll}`);
     playSound('roll');
-    throwDiceVisual(lastMove.roll);
-    await new Promise((resolve) => setTimeout(resolve, 1150));
+    await throwDice(lastMove.roll, lastMove.dice === '3d' ? '3d' : 'css');
     await runOutcomeAnimation({
       kind: lastMove.kind,
       by: rollerIndex,
