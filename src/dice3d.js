@@ -268,15 +268,16 @@ const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 /**
  * Throw the die so it comes to rest at the panel centre with `value` on top.
  *
- * The die travels along a DIAGONAL: it comes in from the upper left or upper right and
- * rolls face-over-face about the horizontal axis across that line. Two reasons: a die
+ * The die travels along a DIAGONAL: it comes in from the lower left or lower right (below
+ * the panel, so its path stays over the controls and never over the board) and rolls
+ * face-over-face, away from the viewer, about the horizontal axis across that line. Two reasons: a die
  * square to the camera shows only its top and one side, which reads as a flat rectangle
  * with two sets of pips; turned ~35° a corner faces the viewer and three faces show, so it
  * reads as a cube. And the roll axis being the same all the way means the settled pose IS
  * the rolling pose, so nothing has to twist at the end.
  *
- * The die also starts high in the air INSIDE the canvas (not off its edge), so it drops
- * into view from above rather than popping in at a screen position.
+ * It is released high in the air, so it drops into view rather than popping in at a
+ * screen position.
  *
  * @param {number} value 1–6
  * @param {{onBounce?: (strength:number) => void}} [opts] called at each table contact
@@ -287,13 +288,15 @@ export function throwDie(value, opts = {}) {
   if (anim) finish();
   die.visible = true;
   const to = restPosition(new THREE.Vector3());
-  // Direction of travel on the table: down the screen and inward from one side.
+  // Direction of travel on the table: UP the screen (away from the viewer) and inward from
+  // one side, so the die comes in from below the panel — the roll button side — and never
+  // passes over the board, which sits above the panel in portrait.
   const side = Math.random() < 0.5 ? -1 : 1;
-  const yaw = side * REST_YAW;                                     // heading, radians from straight down
-  const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));  // travel (world xz)
+  const yaw = side * REST_YAW;                                     // heading, radians from straight up
+  const dir = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw)); // travel (world xz); −z is up the screen
   const axis = new THREE.Vector3(dir.z, 0, -dir.x);                // roll axis: horizontal, across travel
-  // Total table distance from release to rest: from well above the panel's top edge.
-  const D = (panelCY + dieSize * 1.2) / SIN;                       // world units along `dir`
+  // Total table distance from release to rest: from below the panel's bottom edge.
+  const D = (panel.clientHeight / 2 + dieSize * 1.6) / SIN;        // world units along `dir`
   const start = to.clone().addScaledVector(dir, -D); start.y = 0;
   // Face `value` up, with the die yawed to the heading so it is square to its own travel.
   const n = FACE_NORMALS[FACE_VALUES.indexOf(value)] || FACE_NORMALS[2];

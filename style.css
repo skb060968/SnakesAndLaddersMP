@@ -702,10 +702,12 @@ body {
 
 .dice3d-layer {
   position: absolute;
+  /* Bleed: a little above (the flight arc peaks over the title) and a lot below (the die
+     enters from under the roll button and the rest of the panel). Never over the board. */
   left: -20%;
-  top: -190%;
+  top: -120%;
   width: 140%;
-  height: 350%;
+  height: 420%;
   display: block;
   pointer-events: none;
   z-index: 20;                 /* over the panel's own title and controls too */
