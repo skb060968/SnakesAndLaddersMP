@@ -37,12 +37,13 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
  * The bounce's duration follows from the drop (T2 = 2·E·T1), so the arcs look right. */
 const T1 = 0.55, E = 0.42, T2 = 2 * E * T1, T3 = 0.72;
 export const THROW_MS = Math.round((T1 + T2 + T3) * 1000);
-const DROP_H = 2.4;                          // release height, in die sizes
+const DROP_H = 3.2;                          // release height, in die sizes (high: it drops INTO view from above)
 const G = 2 * DROP_H / (T1 * T1);            // gravity that brings it down in exactly T1
 const FLIGHT_TURNS = 2.75;                   // full turns about the roll axis during the drop
 const BOUNCE_TURNS = 1.0;                    // during the bounce (slower: energy lost on landing)
 const FINAL_FLOP = Math.PI / 2;              // the last face-over-face tip on the table
 const WOBBLE = 0.35;                         // rad of secondary wobble about the travel axis, dying out in flight
+const REST_YAW = THREE.MathUtils.degToRad(35); // heading of the roll (and of the settled die) off straight-down: 3 faces show
 
 const ELEV = THREE.MathUtils.degToRad(58);   // camera elevation: top face reads clearly, two sides show depth
 const SIN = Math.sin(ELEV);
@@ -83,7 +84,14 @@ function faceTexture(value) {
   const S = 256, c = document.createElement('canvas');
   c.width = c.height = S;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#f4f2ee'; ctx.fillRect(0, 0, S, S);
+  ctx.fillStyle = '#f6f4f0'; ctx.fillRect(0, 0, S, S);
+  // Faces shade darker toward their edges, so where two faces meet at a bevel there is
+  // always a visible seam — without this, three lit faces merge into one white blob.
+  const edge = ctx.createRadialGradient(S / 2, S / 2, S * 0.28, S / 2, S / 2, S * 0.72);
+  edge.addColorStop(0, 'rgba(0,0,0,0)'); edge.addColorStop(1, 'rgba(60,55,50,0.28)');
+  ctx.fillStyle = edge; ctx.fillRect(0, 0, S, S);
+  ctx.strokeStyle = 'rgba(70,65,60,0.35)'; ctx.lineWidth = S * 0.05;
+  ctx.strokeRect(0, 0, S, S);
   const r = S * 0.085, step = S * 0.27, off = S / 2 - step;
   (PIPS[value] || PIPS[1]).forEach(([cx, cy]) => {
     const x = off + cx * step, y = off + cy * step;
@@ -152,12 +160,14 @@ export function mount(panelEl) {
   scene = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.55;
+  scene.environmentIntensity = 0.3;           // low: the env map was filling the side faces to near-white
   pmrem.dispose();
 
   camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a6a48, 0.7));
-  key = new THREE.DirectionalLight(0xfff3e0, 2.0);
+  // Lighting is deliberately directional so the three visible faces come out at three
+  // distinct brightnesses (top brightest, the two sides different from each other).
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x6a5038, 0.35));
+  key = new THREE.DirectionalLight(0xfff3e0, 2.4);
   key.castShadow = true;
   key.shadow.mapSize.set(1024, 1024);
   key.shadow.bias = -0.0005; key.shadow.normalBias = 0.5;
@@ -205,7 +215,9 @@ function resize() {
   camera.lookAt(center);
   camera.updateProjectionMatrix();
 
-  key.position.copy(center).add(new THREE.Vector3(-0.5, 1, 0.4).normalize().multiplyScalar(1000));
+  // From high on the left and a little toward the viewer: top face lit fully, the left side
+  // face about half, the right side face mostly in shade.
+  key.position.copy(center).add(new THREE.Vector3(-0.9, 1.3, 0.55).normalize().multiplyScalar(1000));
   key.target.position.copy(center);
   const R = Math.max(W, H / SIN) * 0.7;
   key.shadow.camera.left = -R; key.shadow.camera.right = R; key.shadow.camera.top = R; key.shadow.camera.bottom = -R;
@@ -233,18 +245,12 @@ function frame(now) {
 }
 
 /* =================== the throw =================== */
-/**
- * Orientation that puts face `value` on top, square to the travel. Two of the four yaws
- * put the result on the rolling belt (faces flipping about x pass through ±y and ±z), so
- * the yaw is a random one of those, plus a mirror choice for the front face.
- */
+/** Resting orientation with face `value` up, yawed by REST_YAW so three faces show. */
 function targetQuaternion(value) {
   const n = FACE_NORMALS[FACE_VALUES.indexOf(value)] || FACE_NORMALS[2];
   const q = new THREE.Quaternion().setFromUnitVectors(n, UP);
-  // setFromUnitVectors gives the shortest rotation, which for ±x faces leaves them tilted
-  // about z; a yaw of 0 or π keeps the belt (the faces that flip about x) aligned to travel.
-  const yaw = new THREE.Quaternion().setFromAxisAngle(UP, Math.random() < 0.5 ? 0 : Math.PI);
-  return yaw.multiply(q);
+  const side = Math.random() < 0.5 ? -1 : 1;
+  return new THREE.Quaternion().setFromAxisAngle(UP, side * REST_YAW).multiply(q);
 }
 
 /** Show the die at rest in the panel centre with `value` up (no animation). */
@@ -257,13 +263,21 @@ export function showDie(value = 1) {
   die.visible = true;
 }
 
-const X_AXIS = new THREE.Vector3(1, 0, 0);
-const rotX = (angle) => new THREE.Quaternion().setFromAxisAngle(X_AXIS, angle);
 const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
 /**
  * Throw the die so it comes to rest at the panel centre with `value` on top.
+ *
+ * The die travels along a DIAGONAL: it comes in from the upper left or upper right and
+ * rolls face-over-face about the horizontal axis across that line. Two reasons: a die
+ * square to the camera shows only its top and one side, which reads as a flat rectangle
+ * with two sets of pips; turned ~35° a corner faces the viewer and three faces show, so it
+ * reads as a cube. And the roll axis being the same all the way means the settled pose IS
+ * the rolling pose, so nothing has to twist at the end.
+ *
+ * The die also starts high in the air INSIDE the canvas (not off its edge), so it drops
+ * into view from above rather than popping in at a screen position.
+ *
  * @param {number} value 1–6
  * @param {{onBounce?: (strength:number) => void}} [opts] called at each table contact
  * @returns {Promise<void>} resolves when the die has settled
@@ -273,20 +287,26 @@ export function throwDie(value, opts = {}) {
   if (anim) finish();
   die.visible = true;
   const to = restPosition(new THREE.Vector3());
-  // Travel is straight down the screen (+z) from above the top of the canvas to the centre,
-  // with a little sideways drift during the flight that is gone by the first landing.
-  const startPy = -dieSize;
-  const drift = (Math.random() - 0.5) * panel.clientWidth * 0.3;
-  const D = panelCY - startPy;
-  const qTarget = targetQuaternion(value);
-  // Everything rolls about x. Working backwards from the result: the die is flat (a face
-  // down) at the 2nd landing, one quarter-turn short of the target; the bounce and the
-  // flight are whole turns before that, so they end on the same flat orientation.
-  const q2 = rotX(-FINAL_FLOP).multiply(qTarget);              // at the 2nd landing
+  // Direction of travel on the table: down the screen and inward from one side.
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const yaw = side * REST_YAW;                                     // heading, radians from straight down
+  const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));  // travel (world xz)
+  const axis = new THREE.Vector3(dir.z, 0, -dir.x);                // roll axis: horizontal, across travel
+  // Total table distance from release to rest: from well above the panel's top edge.
+  const D = (panelCY + dieSize * 1.2) / SIN;                       // world units along `dir`
+  const start = to.clone().addScaledVector(dir, -D); start.y = 0;
+  // Face `value` up, with the die yawed to the heading so it is square to its own travel.
+  const n = FACE_NORMALS[FACE_VALUES.indexOf(value)] || FACE_NORMALS[2];
+  const qTarget = new THREE.Quaternion().setFromAxisAngle(UP, yaw + (Math.random() < 0.5 ? 0 : Math.PI))
+    .multiply(new THREE.Quaternion().setFromUnitVectors(n, UP));
+  const rot = (angle) => new THREE.Quaternion().setFromAxisAngle(axis, angle);
+  // Working backwards from the result: flat (a face down) at the 2nd landing, one quarter-
+  // turn short of the target; the bounce and the flight are whole turns before that.
+  const q2 = rot(-FINAL_FLOP).multiply(qTarget);
   const wobbleSign = Math.random() < 0.5 ? -1 : 1;
   return new Promise((resolve) => {
     anim = {
-      start: performance.now(), last: performance.now(), to, startPy, drift, D,
+      start: performance.now(), last: performance.now(), to, from: start, dir, rot,
       qTarget, q2, wobbleSign, resolve, onBounce: opts.onBounce, bounced: 0,
     };
     anim.timer = setTimeout(() => finish(), THROW_MS + 80);
@@ -308,48 +328,45 @@ function tick(now) {
   const tSec = Math.min(T1 + T2 + T3, (now - a.start) / 1000);
   const dt = Math.min(0.05, (now - a.last) / 1000); a.last = now;
   const s = dieSize, rest = s / 2;
-  let py, px = panelCX, height, q;
-
   const TWO_PI = 2 * Math.PI;
+  let prog, height, q;                          // prog: fraction of the table distance covered
+
   if (tSec < T1) {
-    /* ---- flight: constant horizontal speed, free fall, fast roll about x ---- */
+    /* ---- flight: constant ground speed, free fall from DROP_H, fast roll ---- */
     const k = tSec / T1;
-    py = a.startPy + a.D * 0.6 * k;
-    px = panelCX + a.drift * (1 - k);
+    prog = 0.6 * k;
     height = (DROP_H - 0.5 * G * tSec * tSec) * s;
     // whole turns that end on q2's orientation at the moment of landing
-    const roll = -(FLIGHT_TURNS + BOUNCE_TURNS) * TWO_PI * (1 - k);
-    q = rotX(roll).multiply(a.q2);
-    // a little wobble about the travel axis (z) that dies out before landing
+    q = a.rot(-(FLIGHT_TURNS + BOUNCE_TURNS) * TWO_PI * (1 - k)).multiply(a.q2);
+    // a little wobble about the travel direction that dies out before landing
     const wob = a.wobbleSign * WOBBLE * (1 - k) * Math.sin(k * Math.PI * 2.5);
-    q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), wob).multiply(q);
+    q = new THREE.Quaternion().setFromAxisAngle(a.dir, wob).multiply(q);
   } else if (tSec < T1 + T2) {
     /* ---- bounce: kicks up with restitution E; same axis, fewer turns ---- */
     if (a.bounced < 1) { a.bounced = 1; a.onBounce?.(1); }
     const u = tSec - T1, k = u / T2;
-    py = a.startPy + a.D * (0.6 + 0.3 * k);
+    prog = 0.6 + 0.3 * k;
     const vUp = E * G * T1;
     height = Math.max(0, vUp * u - 0.5 * G * u * u) * s;
-    const roll = -BOUNCE_TURNS * TWO_PI * (1 - k);
-    q = rotX(roll).multiply(a.q2);
+    q = a.rot(-BOUNCE_TURNS * TWO_PI * (1 - k)).multiply(a.q2);
   } else {
     /* ---- roll: the last 10 % on the table, one face-over-face tip, slowing to rest ---- */
     if (a.bounced < 2) { a.bounced = 2; a.onBounce?.(0.55); }
     const u = tSec - T1 - T2, k = Math.min(1, u / T3);
     const e = easeOutCubic(k);
-    py = a.startPy + a.D * (0.9 + 0.1 * e);
+    prog = 0.9 + 0.1 * e;
     const theta = FINAL_FLOP * e;
     // a square tipping over an edge: its centre rides up to s/√2 at 45° and back down
     height = (Math.abs(Math.cos(theta)) + Math.abs(Math.sin(theta))) * rest - rest;
     if (a.bounced < 3 && theta > FINAL_FLOP * 0.92) { a.bounced = 3; a.onBounce?.(0.3); }
-    q = rotX(theta - FINAL_FLOP).multiply(a.qTarget);
+    q = a.rot(theta - FINAL_FLOP).multiply(a.qTarget);
     if (k > 0.85) {                              // faint rock as it comes to rest
       const r = (k - 0.85) / 0.15;
-      q = rotX(Math.sin(r * Math.PI * 2) * (1 - r) * 0.05).multiply(q);
+      q = a.rot(Math.sin(r * Math.PI * 2) * (1 - r) * 0.05).multiply(q);
     }
   }
 
-  toWorld(px, py, die.position);
+  die.position.lerpVectors(a.from, a.to, prog);
   die.position.y = rest + Math.max(0, height);
   die.quaternion.copy(q);
   if (tSec >= T1 + T2 + T3) finish();
