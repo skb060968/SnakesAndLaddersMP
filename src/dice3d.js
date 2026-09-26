@@ -230,9 +230,15 @@ function resize() {
   if (!anim && die.visible) restPosition(die.position);
 }
 
-/** Where the die sits when settled: panel centre, resting on the table. */
+/**
+ * Where the die sits when settled, resting on the table. Its BASE is placed a little
+ * below the panel centre: a cube seen from above extends upward on screen (top face plus
+ * the visible sides), so centring the base made the die look high; this centres the
+ * visible mass between the title and the roll button.
+ */
+const REST_DOWN = 0.32;                      // die sizes below the panel centre
 function restPosition(out) {
-  toWorld(panelCX, panelCY, out);
+  toWorld(panelCX, panelCY + dieSize * REST_DOWN, out);
   out.y = dieSize / 2;
   return out;
 }
