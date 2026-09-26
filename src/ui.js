@@ -502,8 +502,10 @@ function applyDiceMode() {
   if (use3d) dice3d.showDie(lastDiceValue); else dice3d.hideDie();
   const btn = document.getElementById('dice-toggle-btn');
   if (btn) {
-    btn.textContent = use3d ? '🎲' : '⬜';
-    btn.title = use3d ? 'Dice: 3D — tap for classic' : 'Dice: classic — tap for 3D';
+    // The button pictures the OTHER dice — the one a tap switches to.
+    btn.textContent = '';
+    btn.dataset.next = use3d ? 'classic' : 'white';
+    btn.title = use3d ? 'Switch to the wooden dice' : 'Switch to the white dice';
     btn.setAttribute('aria-label', btn.title);
   }
 }

@@ -659,6 +659,12 @@ body {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   color: #fff;
   flex-shrink: 0;
+  /* Above the board column: the 3D die's canvas bleeds up out of this panel over the
+     board (portrait) and must draw in FRONT of the board and its frame while it falls.
+     backdrop-filter already makes this panel a stacking context, so z-index here is what
+     orders it against the board column, which stays at auto. */
+  position: relative;
+  z-index: 10;
 }
 
 /* Gameplay control panel title is more compact than landing/lobby title. (The old turn
@@ -697,12 +703,12 @@ body {
 .dice3d-layer {
   position: absolute;
   left: -20%;
-  top: -130%;
+  top: -190%;
   width: 140%;
-  height: 290%;
+  height: 350%;
   display: block;
   pointer-events: none;
-  z-index: 3;
+  z-index: 20;                 /* over the panel's own title and controls too */
 }
 
 /* Roll button with the small dice-style picker beside it. */
@@ -718,13 +724,39 @@ body {
   max-width: none;
   min-width: 0;
 }
+/* The dice-style toggle shows a miniature of the OTHER dice (the one a tap switches to):
+   the wooden PNG face when the white die is active, a drawn white die with black pips
+   when the wooden cube is active. */
 .roll-buttons .dice-toggle {
   flex: 0 0 auto;
-  width: auto;
+  width: 48px;
   max-width: none;
-  padding: 10px 12px;
-  font-size: 1.15rem;
-  line-height: 1;
+  padding: 6px;
+  line-height: 0;
+  display: grid;
+  place-items: center;
+}
+.roll-buttons .dice-toggle::before {
+  content: "";
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+.roll-buttons .dice-toggle[data-next="classic"]::before {
+  background-image: url("/images/die-5.png");
+}
+.roll-buttons .dice-toggle[data-next="white"]::before {
+  /* five black pips on white, drawn with radial gradients */
+  background-color: #f4f2ee;
+  background-image:
+    radial-gradient(circle at 25% 25%, #111 0 3px, transparent 3.5px),
+    radial-gradient(circle at 75% 25%, #111 0 3px, transparent 3.5px),
+    radial-gradient(circle at 50% 50%, #111 0 3px, transparent 3.5px),
+    radial-gradient(circle at 25% 75%, #111 0 3px, transparent 3.5px),
+    radial-gradient(circle at 75% 75%, #111 0 3px, transparent 3.5px);
 }
 
 .dice-cube {

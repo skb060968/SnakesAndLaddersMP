@@ -14,8 +14,14 @@
  *   hideDie()               hide it (CSS-cube roll, new game)
  *   THROW_MS                total animation length
  *
- * Faces are the same die-1…6 PNGs the CSS cube uses, downscaled to 256² for the GPU.
- * Opposite faces sum to 7: +x 3, −x 4, +y 1, −y 6, +z 2, −z 5.
+ * Look: traditional white plastic with black recessed pips and bevelled edges (all drawn
+ * procedurally). Opposite faces sum to 7: +x 3, −x 4, +y 1, −y 6, +z 2, −z 5.
+ *
+ * Motion: ONE roll axis for the whole throw — the x axis, across the line of travel — so
+ * the die goes face-over-face down the screen like a real thrown die. The starting
+ * orientation is the target rotated backwards by the total spin, so the sequence ends
+ * exactly on the result with no blending. (Only the four faces on the rolling belt can
+ * come up; the result is always one of them by construction.)
  */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -33,8 +39,10 @@ const T1 = 0.55, E = 0.42, T2 = 2 * E * T1, T3 = 0.72;
 export const THROW_MS = Math.round((T1 + T2 + T3) * 1000);
 const DROP_H = 2.4;                          // release height, in die sizes
 const G = 2 * DROP_H / (T1 * T1);            // gravity that brings it down in exactly T1
-const ROLL_TURNS_AIR = 1.25;                 // full turns rolled during the bounce
+const FLIGHT_TURNS = 2.75;                   // full turns about the roll axis during the drop
+const BOUNCE_TURNS = 1.0;                    // during the bounce (slower: energy lost on landing)
 const FINAL_FLOP = Math.PI / 2;              // the last face-over-face tip on the table
+const WOBBLE = 0.35;                         // rad of secondary wobble about the travel axis, dying out in flight
 
 const ELEV = THREE.MathUtils.degToRad(58);   // camera elevation: top face reads clearly, two sides show depth
 const SIN = Math.sin(ELEV);
@@ -56,17 +64,57 @@ let panelCX = 0, panelCY = 0;                 // panel centre in canvas pixels (
 let restQ = new THREE.Quaternion();           // orientation of the die at rest (last value up)
 
 /* =================== textures =================== */
+/* Pip layout on a 3×3 grid (column, row), 0..2. */
+const PIPS = {
+  1: [[1, 1]],
+  2: [[0, 0], [2, 2]],
+  3: [[0, 0], [1, 1], [2, 2]],
+  4: [[0, 0], [2, 0], [0, 2], [2, 2]],
+  5: [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]],
+  6: [[0, 0], [2, 0], [0, 1], [2, 1], [0, 2], [2, 2]],
+};
+
+/**
+ * Colour map for one face: white plastic with black recessed pips. Each pip is drawn
+ * as a dark disc with a lighter inner gradient and a faint highlight on its lower rim,
+ * which reads as a drilled hollow under the key light.
+ */
 function faceTexture(value) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
+  const S = 256, c = document.createElement('canvas');
+  c.width = c.height = S;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#f7f3ea'; ctx.fillRect(0, 0, 256, 256);   // placeholder until the PNG lands
+  ctx.fillStyle = '#f4f2ee'; ctx.fillRect(0, 0, S, S);
+  const r = S * 0.085, step = S * 0.27, off = S / 2 - step;
+  (PIPS[value] || PIPS[1]).forEach(([cx, cy]) => {
+    const x = off + cx * step, y = off + cy * step;
+    // the hollow
+    const g = ctx.createRadialGradient(x - r * 0.25, y - r * 0.3, r * 0.1, x, y, r);
+    g.addColorStop(0, '#2a2a2e'); g.addColorStop(0.7, '#101012'); g.addColorStop(1, '#050506');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    // lit lower-right rim of the recess
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = r * 0.14;
+    ctx.beginPath(); ctx.arc(x, y, r * 0.93, Math.PI * 0.15, Math.PI * 0.75); ctx.stroke();
+  });
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  const img = new Image();
-  img.onload = () => { ctx.drawImage(img, 0, 0, 256, 256); tex.needsUpdate = true; };
-  img.src = `/images/die-${value}.png`;
+  return tex;
+}
+
+/** Roughness map: the pips are matte (drilled and painted), the faces glossy. */
+function faceRoughness(value) {
+  const S = 256, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#2e2e2e'; ctx.fillRect(0, 0, S, S);             // ~0.18 roughness on the plastic
+  const r = S * 0.085, step = S * 0.27, off = S / 2 - step;
+  ctx.fillStyle = '#b0b0b0';                                          // ~0.7 in the pips
+  (PIPS[value] || PIPS[1]).forEach(([cx, cy]) => {
+    ctx.beginPath(); ctx.arc(off + cx * step, off + cy * step, r, 0, Math.PI * 2); ctx.fill();
+  });
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace;
   return tex;
 }
 
@@ -119,10 +167,13 @@ export function mount(panelEl) {
   catcher.rotation.x = -Math.PI / 2; catcher.receiveShadow = true;
   scene.add(catcher);
 
+  // Classic white casino-style plastic: glossy faces, matte pips, generous bevelled edges
+  // (the rounded-box radius is 13 % of the side with 6 segments so the bevel catches light).
   const mats = FACE_VALUES.map((v) => new THREE.MeshPhysicalMaterial({
-    map: faceTexture(v), roughness: 0.28, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.2,
+    map: faceTexture(v), roughnessMap: faceRoughness(v), roughness: 1, metalness: 0,
+    clearcoat: 0.9, clearcoatRoughness: 0.12, specularIntensity: 0.8,
   }));
-  die = new THREE.Mesh(new RoundedBoxGeometry(1, 1, 1, 4, 0.09), mats);
+  die = new THREE.Mesh(new RoundedBoxGeometry(1, 1, 1, 6, 0.13), mats);
   die.castShadow = true;
   die.visible = false;
   scene.add(die);
@@ -183,14 +234,16 @@ function frame(now) {
 
 /* =================== the throw =================== */
 /**
- * Orientation that puts face `value` on top. The yaw is a random quarter-turn so the
- * faces stay square to the direction of travel: the die rolls face-over-face along
- * the line of the throw and finishes exactly on the result.
+ * Orientation that puts face `value` on top, square to the travel. Two of the four yaws
+ * put the result on the rolling belt (faces flipping about x pass through ±y and ±z), so
+ * the yaw is a random one of those, plus a mirror choice for the front face.
  */
 function targetQuaternion(value) {
   const n = FACE_NORMALS[FACE_VALUES.indexOf(value)] || FACE_NORMALS[2];
   const q = new THREE.Quaternion().setFromUnitVectors(n, UP);
-  const yaw = new THREE.Quaternion().setFromAxisAngle(UP, Math.floor(Math.random() * 4) * Math.PI / 2);
+  // setFromUnitVectors gives the shortest rotation, which for ±x faces leaves them tilted
+  // about z; a yaw of 0 or π keeps the belt (the faces that flip about x) aligned to travel.
+  const yaw = new THREE.Quaternion().setFromAxisAngle(UP, Math.random() < 0.5 ? 0 : Math.PI);
   return yaw.multiply(q);
 }
 
@@ -226,13 +279,15 @@ export function throwDie(value, opts = {}) {
   const drift = (Math.random() - 0.5) * panel.clientWidth * 0.3;
   const D = panelCY - startPy;
   const qTarget = targetQuaternion(value);
-  const q2 = rotX(-FINAL_FLOP).multiply(qTarget);              // orientation at the 2nd landing (flat)
-  const spinAxis = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+  // Everything rolls about x. Working backwards from the result: the die is flat (a face
+  // down) at the 2nd landing, one quarter-turn short of the target; the bounce and the
+  // flight are whole turns before that, so they end on the same flat orientation.
+  const q2 = rotX(-FINAL_FLOP).multiply(qTarget);              // at the 2nd landing
+  const wobbleSign = Math.random() < 0.5 ? -1 : 1;
   return new Promise((resolve) => {
     anim = {
       start: performance.now(), last: performance.now(), to, startPy, drift, D,
-      qFree: new THREE.Quaternion().random(), spinAxis, spinRate: 20 + Math.random() * 6,   // rad/s
-      qTarget, q2, resolve, onBounce: opts.onBounce, bounced: 0,
+      qTarget, q2, wobbleSign, resolve, onBounce: opts.onBounce, bounced: 0,
     };
     anim.timer = setTimeout(() => finish(), THROW_MS + 80);
   });
@@ -255,27 +310,28 @@ function tick(now) {
   const s = dieSize, rest = s / 2;
   let py, px = panelCX, height, q;
 
+  const TWO_PI = 2 * Math.PI;
   if (tSec < T1) {
-    /* ---- flight: constant horizontal speed, free fall, fast free tumble ---- */
+    /* ---- flight: constant horizontal speed, free fall, fast roll about x ---- */
     const k = tSec / T1;
     py = a.startPy + a.D * 0.6 * k;
     px = panelCX + a.drift * (1 - k);
     height = (DROP_H - 0.5 * G * tSec * tSec) * s;
-    a.qFree.premultiply(new THREE.Quaternion().setFromAxisAngle(a.spinAxis, a.spinRate * dt)).normalize();
-    q = a.qFree;
+    // whole turns that end on q2's orientation at the moment of landing
+    const roll = -(FLIGHT_TURNS + BOUNCE_TURNS) * TWO_PI * (1 - k);
+    q = rotX(roll).multiply(a.q2);
+    // a little wobble about the travel axis (z) that dies out before landing
+    const wob = a.wobbleSign * WOBBLE * (1 - k) * Math.sin(k * Math.PI * 2.5);
+    q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), wob).multiply(q);
   } else if (tSec < T1 + T2) {
-    /* ---- bounce: kicks up with restitution E; the tumble is steered into a roll ---- */
+    /* ---- bounce: kicks up with restitution E; same axis, fewer turns ---- */
     if (a.bounced < 1) { a.bounced = 1; a.onBounce?.(1); }
     const u = tSec - T1, k = u / T2;
     py = a.startPy + a.D * (0.6 + 0.3 * k);
     const vUp = E * G * T1;
     height = Math.max(0, vUp * u - 0.5 * G * u * u) * s;
-    // free tumble continues, slowed by the impact
-    a.qFree.premultiply(new THREE.Quaternion().setFromAxisAngle(a.spinAxis, a.spinRate * 0.45 * dt)).normalize();
-    // the clean roll it is being steered onto: about the axis across the travel, ending at q2
-    const rollAngle = ROLL_TURNS_AIR * 2 * Math.PI;
-    const qRoll = rotX(rollAngle * (k - 1)).multiply(a.q2);
-    q = a.qFree.clone().slerp(qRoll, smooth(k / 0.65));   // fully aligned by 65 % of the bounce
+    const roll = -BOUNCE_TURNS * TWO_PI * (1 - k);
+    q = rotX(roll).multiply(a.q2);
   } else {
     /* ---- roll: the last 10 % on the table, one face-over-face tip, slowing to rest ---- */
     if (a.bounced < 2) { a.bounced = 2; a.onBounce?.(0.55); }
