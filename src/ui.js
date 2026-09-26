@@ -15,8 +15,7 @@
  *   - animateSteps(...)          — moves a token N squares with hop animation
  *   - animateSnakeOrLadder(...)  — slide-jump along a snake/ladder path
  *   - highlightActiveToken(idx)  — pulses the current player's token
- *   - setMessage(text)           — sets the message line
- *   - setTurn(text)              — sets the turn header
+ *   - setMessage(text)           — sets the single status line (turn + events)
  *   - renderPositions(state, localIdx) — fills the positions list
  */
 
@@ -152,6 +151,40 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') pauseBackgroundMusic();
   else resumeBackgroundMusic();
 });
+
+/**
+ * A die landing on the table: a short synthesised "clack" (a click of filtered noise over
+ * a small wooden thud), scaled by `strength` 0..1. No sound file needed; silent until the
+ * first tap has unlocked audio, and while muted.
+ */
+function playClack(strength = 1) {
+  if (_muted || !audioCtx) return;
+  try {
+    const t0 = audioCtx.currentTime;
+    const out = audioCtx.createGain();
+    out.gain.setValueAtTime(0.0001, t0);
+    out.gain.exponentialRampToValueAtTime(0.55 * strength, t0 + 0.004);
+    out.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07 + 0.06 * strength);
+    out.connect(audioCtx.destination);
+    // the thud: a sine that drops in pitch
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(240 + 90 * strength, t0);
+    osc.frequency.exponentialRampToValueAtTime(110, t0 + 0.08);
+    osc.connect(out);
+    osc.start(t0); osc.stop(t0 + 0.16);
+    // the click: a 40 ms burst of band-passed noise with a sharp decay
+    const len = Math.floor(audioCtx.sampleRate * 0.04);
+    const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i += 1) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    const src = audioCtx.createBufferSource(); src.buffer = buf;
+    const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2400; bp.Q.value = 0.9;
+    const ng = audioCtx.createGain(); ng.gain.value = 0.4 * strength;
+    src.connect(bp); bp.connect(ng); ng.connect(out);
+    src.start(t0);
+  } catch (_) {}
+}
 
 export function playSound(name) {
   if (_muted) return;
@@ -497,7 +530,7 @@ export function throwDice(value) {
   if (diceMode === '3d' && panel && dice3d.mount(panel)) {
     const stage = document.querySelector('.dice-stage');
     if (stage) stage.hidden = true;
-    return dice3d.throwDie(value);
+    return dice3d.throwDie(value, { onBounce: playClack });
   }
   throwDiceVisual(value);
   return new Promise((r) => setTimeout(r, CSS_DICE_MS));
@@ -578,10 +611,7 @@ export function setMessage(text) {
   if (el) el.textContent = text || '';
 }
 
-export function setTurn(text) {
-  const el = document.getElementById('turn');
-  if (el) el.textContent = text || '';
-}
+
 
 export /**
  * @param {object} state

@@ -57,7 +57,6 @@ import {
   setTokenEffect,
   playSound,
   setMessage,
-  setTurn,
   renderPositions,
   setRollButtonState,
   isMuted,
@@ -908,13 +907,16 @@ function localStateIndex() {
   return state?.players?.findIndex((player) => player.slotKey === key) ?? -1;
 }
 
-/** Status line for the player to move — says so if they are offline, rather than
- *  leaving "<name>'s turn" up while the watchdog waits to skip them. */
+/** The one status line: whose turn it is (yours / waiting for X / X is offline and will
+ *  be skipped). Event text ("Snake! down to 74") takes the line over during a roll, so
+ *  presence changes mid-animation leave it alone; renderUI restores it afterwards. */
 function refreshTurnText() {
-  if (!state || state.status === 'finished') return;
+  if (!state || state.status === 'finished' || _isAnimating) return;
   const cur = state.players?.[state.currentPlayerIndex];
-  const who = `${cur?.emoji || ''} ${cur?.name || 'Player'}`;
-  setTurn(peerOffline(cur?.slotKey) ? `${who} is offline — turn will be skipped…` : `${who}'s turn`);
+  const who = `${cur?.emoji || ''} ${cur?.name || 'Player'}`.trim();
+  if (peerOffline(cur?.slotKey)) setMessage(`${who} is offline — turn will be skipped…`);
+  else if (state.currentPlayerIndex === localStateIndex()) setMessage('Your turn — roll the dice');
+  else setMessage(`Waiting for ${who}…`);
 }
 
 function renderUI() {
@@ -930,14 +932,7 @@ function renderUI() {
 
   const isMyTurn = state.currentPlayerIndex === localStateIndex();
   const cur = state.players?.[state.currentPlayerIndex];
-  const curColor = cur?.color || 'red';
-  setRollButtonState(isMyTurn && !_isAnimating, curColor);
-
-  if (isMyTurn) {
-    setMessage('Your turn — roll the dice');
-  } else {
-    setMessage(`Waiting for ${cur?.name || 'opponent'}…`);
-  }
+  setRollButtonState(isMyTurn && !_isAnimating, cur?.color || 'red');
 }
 
 /* ======= ROLL HANDLER ======= */

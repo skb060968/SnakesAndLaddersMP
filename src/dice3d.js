@@ -1,13 +1,16 @@
 /**
  * Snakes & Ladders MP — 3D dice (three.js)
  *
- * A transparent WebGL canvas over the dice panel. The die tumbles in from the right
- * edge of the control panel, bounces twice and settles in the centre with the rolled
- * value on top. Purely visual: the value comes from the engine, the tumble is scripted
- * (no physics), so it always lands on the number it was told to.
+ * A transparent WebGL canvas over the dice panel. The die drops in from above the top
+ * of the panel spinning fast, lands, bounces on while its tumble is steered into a roll
+ * along the line of travel, then tips over once more on the table and settles in the
+ * centre with the rolled value on top. Purely visual: the value comes from the engine,
+ * the motion is simple ballistics plus a scripted orientation, so it always lands on
+ * the number it was told to.
  *
  *   mount(panelEl)          → boolean (false if WebGL failed; caller falls back to the CSS cube)
- *   throwDie(value)         → Promise<void>, resolves when the die has settled (THROW_MS)
+ *   throwDie(value, {onBounce}) → Promise<void>, resolves when the die has settled (THROW_MS)
+ *   showDie(value)          show it at rest with `value` up
  *   hideDie()               hide it (CSS-cube roll, new game)
  *   THROW_MS                total animation length
  *
@@ -18,7 +21,20 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-export const THROW_MS = 1800;
+/* The throw is three beats, timed by simple ballistics (heights in die-size units):
+ *   flight  — drops in from above the top of the panel, spinning fast, lands 60 % of the way
+ *   bounce  — kicks up (restitution E) and covers the next 30 %; in the air the free tumble
+ *             is steered into a clean roll about the axis across the travel, phased so the
+ *             result face comes round on the line of the roll
+ *   roll    — the last 10 % on the table: tips over one edge, slowing, and settles with
+ *             the result on top at the panel centre
+ * The bounce's duration follows from the drop (T2 = 2·E·T1), so the arcs look right. */
+const T1 = 0.55, E = 0.42, T2 = 2 * E * T1, T3 = 0.72;
+export const THROW_MS = Math.round((T1 + T2 + T3) * 1000);
+const DROP_H = 2.4;                          // release height, in die sizes
+const G = 2 * DROP_H / (T1 * T1);            // gravity that brings it down in exactly T1
+const ROLL_TURNS_AIR = 1.25;                 // full turns rolled during the bounce
+const FINAL_FLOP = Math.PI / 2;              // the last face-over-face tip on the table
 
 const ELEV = THREE.MathUtils.degToRad(58);   // camera elevation: top face reads clearly, two sides show depth
 const SIN = Math.sin(ELEV);
@@ -166,11 +182,15 @@ function frame(now) {
 }
 
 /* =================== the throw =================== */
-/** Orientation that puts face `value` on top, with a random yaw about the vertical. */
+/**
+ * Orientation that puts face `value` on top. The yaw is a random quarter-turn so the
+ * faces stay square to the direction of travel: the die rolls face-over-face along
+ * the line of the throw and finishes exactly on the result.
+ */
 function targetQuaternion(value) {
   const n = FACE_NORMALS[FACE_VALUES.indexOf(value)] || FACE_NORMALS[2];
   const q = new THREE.Quaternion().setFromUnitVectors(n, UP);
-  const yaw = new THREE.Quaternion().setFromAxisAngle(UP, (Math.random() - 0.5) * 0.9);
+  const yaw = new THREE.Quaternion().setFromAxisAngle(UP, Math.floor(Math.random() * 4) * Math.PI / 2);
   return yaw.multiply(q);
 }
 
@@ -184,33 +204,35 @@ export function showDie(value = 1) {
   die.visible = true;
 }
 
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const rotX = (angle) => new THREE.Quaternion().setFromAxisAngle(X_AXIS, angle);
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+
 /**
- * The throw, in four beats over THROW_MS:
- *   0.00–0.30  flies in from off the right edge in a high arc, tumbling fast
- *   0.30–0.55  first bounce: lands short of centre, kicks up, keeps rolling toward it
- *   0.55–0.78  second, lower bounce; the tumble is now mostly a roll about one axis
- *   0.78–1.00  skids the last bit, overshoots the centre a touch, rocks and settles
- * The orientation is a free tumble that decays, blended into the exact target over the
- * last 45 % so the value is always right; a final tiny rock sells the settle.
+ * Throw the die so it comes to rest at the panel centre with `value` on top.
+ * @param {number} value 1–6
+ * @param {{onBounce?: (strength:number) => void}} [opts] called at each table contact
+ * @returns {Promise<void>} resolves when the die has settled
  */
-export function throwDie(value) {
+export function throwDie(value, opts = {}) {
   if (!renderer || !die) return Promise.resolve();
   if (anim) finish();
   die.visible = true;
   const to = restPosition(new THREE.Vector3());
-  const from = toWorld(panelCX + panel.clientWidth * 0.5 + dieSize * 2.2, panelCY + dieSize * 0.4);
-  // Waypoints along the run-in: first landing right of centre, second just past centre.
-  const p1 = toWorld(panelCX + panel.clientWidth * 0.22, panelCY - dieSize * 0.15);
-  const p2 = toWorld(panelCX - dieSize * 0.35, panelCY + dieSize * 0.1);
-  const q0 = new THREE.Quaternion().random();
-  // Tumble axis mostly across the travel (x), so the die rolls end over end, plus a wobble.
-  const spin = new THREE.Vector3(1, 0.35 * (Math.random() - 0.5), 0.9 + Math.random() * 0.4).normalize()
-    .multiplyScalar(18 + Math.random() * 6);              // rad/s at release
+  // Travel is straight down the screen (+z) from above the top of the canvas to the centre,
+  // with a little sideways drift during the flight that is gone by the first landing.
+  const startPy = -dieSize;
+  const drift = (Math.random() - 0.5) * panel.clientWidth * 0.3;
+  const D = panelCY - startPy;
+  const qTarget = targetQuaternion(value);
+  const q2 = rotX(-FINAL_FLOP).multiply(qTarget);              // orientation at the 2nd landing (flat)
+  const spinAxis = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
   return new Promise((resolve) => {
     anim = {
-      start: performance.now(), last: performance.now(), from, p1, p2, to,
-      q0, q: q0.clone(), qTarget: targetQuaternion(value), spin, resolve,
-      rockAxis: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
+      start: performance.now(), last: performance.now(), to, startPy, drift, D,
+      qFree: new THREE.Quaternion().random(), spinAxis, spinRate: 20 + Math.random() * 6,   // rad/s
+      qTarget, q2, resolve, onBounce: opts.onBounce, bounced: 0,
     };
     anim.timer = setTimeout(() => finish(), THROW_MS + 80);
   });
@@ -226,54 +248,55 @@ function finish() {
   a.resolve();
 }
 
-const easeOut = (t) => 1 - Math.pow(1 - t, 2);
-const seg = (t, a, b) => Math.min(1, Math.max(0, (t - a) / (b - a)));
-
 function tick(now) {
   const a = anim;
-  const t = Math.min(1, (now - a.start) / THROW_MS);
+  const tSec = Math.min(T1 + T2 + T3, (now - a.start) / 1000);
   const dt = Math.min(0.05, (now - a.last) / 1000); a.last = now;
-  const rest = dieSize / 2;
-  const pos = die.position;
-  let lift = 0;
-  if (t < 0.30) {                               // flight in
-    const k = seg(t, 0, 0.30);
-    pos.lerpVectors(a.from, a.p1, k);
-    lift = Math.sin(k * Math.PI) * dieSize * 1.9 + (1 - k) * dieSize * 0.6;
-  } else if (t < 0.55) {                        // bounce 1
-    const k = seg(t, 0.30, 0.55);
-    pos.lerpVectors(a.p1, a.p2, easeOut(k));
-    lift = Math.sin(k * Math.PI) * dieSize * 0.7;
-  } else if (t < 0.78) {                        // bounce 2, rolling on
-    const k = seg(t, 0.55, 0.78);
-    const over = a.to.clone().addScaledVector(a.to.clone().sub(a.p2).normalize(), dieSize * 0.18); // slight overshoot
-    pos.lerpVectors(a.p2, over, easeOut(k));
-    lift = Math.sin(k * Math.PI) * dieSize * 0.28;
-  } else {                                      // skid back to centre and settle
-    const k = seg(t, 0.78, 1);
-    const over = a.to.clone().addScaledVector(a.to.clone().sub(a.p2).normalize(), dieSize * 0.18);
-    pos.lerpVectors(over, a.to, easeOut(k));
-    lift = Math.max(0, Math.sin(k * Math.PI * 2) * (1 - k)) * dieSize * 0.05;
-  }
-  pos.y = rest + lift;
+  const s = dieSize, rest = s / 2;
+  let py, px = panelCX, height, q;
 
-  // Free tumble, decaying; each landing knocks the spin down hard (energy lost to the table).
-  const decay = t < 0.30 ? 1 : t < 0.55 ? 0.55 : t < 0.78 ? 0.28 : 0.1;
-  const w = a.spin.clone().multiplyScalar(decay * (1 - t * 0.5));
-  const ang = w.length() * dt;
-  if (ang > 0) a.q.premultiply(new THREE.Quaternion().setFromAxisAngle(w.normalize(), ang)).normalize();
-  if (t > 0.55) {
-    const k = seg(t, 0.55, 1);
-    die.quaternion.slerpQuaternions(a.q, a.qTarget, k * k * (3 - 2 * k));
-    if (t > 0.78) {                             // rock on the landing edge, dying out
-      const r = seg(t, 0.78, 1);
-      const rock = Math.sin(r * Math.PI * 3) * (1 - r) * 0.16;
-      die.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(a.rockAxis, rock));
-    }
+  if (tSec < T1) {
+    /* ---- flight: constant horizontal speed, free fall, fast free tumble ---- */
+    const k = tSec / T1;
+    py = a.startPy + a.D * 0.6 * k;
+    px = panelCX + a.drift * (1 - k);
+    height = (DROP_H - 0.5 * G * tSec * tSec) * s;
+    a.qFree.premultiply(new THREE.Quaternion().setFromAxisAngle(a.spinAxis, a.spinRate * dt)).normalize();
+    q = a.qFree;
+  } else if (tSec < T1 + T2) {
+    /* ---- bounce: kicks up with restitution E; the tumble is steered into a roll ---- */
+    if (a.bounced < 1) { a.bounced = 1; a.onBounce?.(1); }
+    const u = tSec - T1, k = u / T2;
+    py = a.startPy + a.D * (0.6 + 0.3 * k);
+    const vUp = E * G * T1;
+    height = Math.max(0, vUp * u - 0.5 * G * u * u) * s;
+    // free tumble continues, slowed by the impact
+    a.qFree.premultiply(new THREE.Quaternion().setFromAxisAngle(a.spinAxis, a.spinRate * 0.45 * dt)).normalize();
+    // the clean roll it is being steered onto: about the axis across the travel, ending at q2
+    const rollAngle = ROLL_TURNS_AIR * 2 * Math.PI;
+    const qRoll = rotX(rollAngle * (k - 1)).multiply(a.q2);
+    q = a.qFree.clone().slerp(qRoll, smooth(k / 0.65));   // fully aligned by 65 % of the bounce
   } else {
-    die.quaternion.copy(a.q);
+    /* ---- roll: the last 10 % on the table, one face-over-face tip, slowing to rest ---- */
+    if (a.bounced < 2) { a.bounced = 2; a.onBounce?.(0.55); }
+    const u = tSec - T1 - T2, k = Math.min(1, u / T3);
+    const e = easeOutCubic(k);
+    py = a.startPy + a.D * (0.9 + 0.1 * e);
+    const theta = FINAL_FLOP * e;
+    // a square tipping over an edge: its centre rides up to s/√2 at 45° and back down
+    height = (Math.abs(Math.cos(theta)) + Math.abs(Math.sin(theta))) * rest - rest;
+    if (a.bounced < 3 && theta > FINAL_FLOP * 0.92) { a.bounced = 3; a.onBounce?.(0.3); }
+    q = rotX(theta - FINAL_FLOP).multiply(a.qTarget);
+    if (k > 0.85) {                              // faint rock as it comes to rest
+      const r = (k - 0.85) / 0.15;
+      q = rotX(Math.sin(r * Math.PI * 2) * (1 - r) * 0.05).multiply(q);
+    }
   }
-  if (t >= 1) finish();
+
+  toWorld(px, py, die.position);
+  die.position.y = rest + Math.max(0, height);
+  die.quaternion.copy(q);
+  if (tSec >= T1 + T2 + T3) finish();
 }
 
 export function hideDie() {

@@ -661,33 +661,19 @@ body {
   flex-shrink: 0;
 }
 
-.turn {
-  margin-top: 0;
-  font-size: 1rem;
-  font-weight: 800;
-  text-align: center;
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-}
-
-/* Gameplay control panel title is more compact than landing/lobby title */
+/* Gameplay control panel title is more compact than landing/lobby title. (The old turn
+   line under it is gone: whose turn it is now lives in the single #message status line.) */
 #gameplay .panel-header { text-align: center; width: 100%; }
 #gameplay .title {
   font-size: 1.1rem;
   margin-top: 0;
   font-family: Georgia, serif;
 }
-/* Turn line now leads the status block (above the positions), so nothing sits over the dice. */
-#gameplay .turn {
-  margin: 0 0 6px;
-  font-size: 0.95rem;
-  font-weight: 800;
-}
 
 /* Dice — one dice sits centred at the top of the control column: either the classic CSS
    cube, or the 3D die (dice3d.js) on a transparent WebGL canvas. The canvas bleeds well
-   past the panel on every side so the throw arc and the run-in from the right edge are
-   never clipped; it ignores pointer events. */
+   past the panel — mostly ABOVE it, since the die drops in from the top over the title —
+   so the fall and the bounces are never clipped; it ignores pointer events. */
 .dice-panel {
   position: relative;
   width: 100%;
@@ -711,9 +697,9 @@ body {
 .dice3d-layer {
   position: absolute;
   left: -20%;
-  top: -80%;
+  top: -130%;
   width: 140%;
-  height: 240%;
+  height: 290%;
   display: block;
   pointer-events: none;
   z-index: 3;
