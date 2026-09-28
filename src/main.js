@@ -997,6 +997,7 @@ async function handleRoll() {
   // Local animation
   playSound('roll');
   await throwDice(roll);
+  setMessage(`You rolled ${roll}`);
 
   // Drive animations based on outcome kind
   await runOutcomeAnimation(outcome);
@@ -1159,9 +1160,11 @@ async function handleRemoteUpdate(gameData, lastMove) {
   _isAnimating = true;
   _lastProcessedRevision = newState.revision;
   try {
-    setMessage(`${state.players[rollerIndex]?.name || 'Opponent'} rolled ${lastMove.roll}`);
+    const rollerName = state.players[rollerIndex]?.name || 'Opponent';
+    setMessage(`${rollerName} is rolling…`);
     playSound('roll');
     await throwDice(lastMove.roll);
+    setMessage(`${rollerName} rolled ${lastMove.roll}`);   // only once the dice has settled
     await runOutcomeAnimation({
       kind: lastMove.kind,
       by: rollerIndex,
