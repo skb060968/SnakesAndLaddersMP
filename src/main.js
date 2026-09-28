@@ -997,7 +997,7 @@ async function handleRoll() {
   // Local animation
   playSound('roll');
   await throwDice(roll);
-  setMessage(`You rolled ${roll}`);
+  await announceRoll(`You rolled ${roll}`);
 
   // Drive animations based on outcome kind
   await runOutcomeAnimation(outcome);
@@ -1015,6 +1015,16 @@ async function handleRoll() {
   _isAnimating = false;
   renderUI();
   drainPendingRemoteUpdate();
+}
+
+/**
+ * Shows the roll result once the dice has settled and holds it long enough to read
+ * before the token starts moving. The outcome animation keeps the text up while the
+ * token walks (it only replaces it for events: snake, ladder, capture, sixes).
+ */
+async function announceRoll(text) {
+  setMessage(text);
+  await new Promise((r) => setTimeout(r, 650));
 }
 
 /**
@@ -1045,8 +1055,7 @@ async function runOutcomeAnimation(outcome) {
       break;
 
     case 'ladder-bonus':
-      // Player climbed a ladder and gets bonus turn
-      setMessage('');
+      // Player climbed a ladder and gets bonus turn (the roll text stays up while walking)
       await animateSteps(idx, outcome.steps, positions);
       if (outcome.snakeLadderTo != null) {
         await animateSnakeOrLadder(idx, outcome.snakeLadderTo, 'ladder', positions);
@@ -1067,8 +1076,7 @@ async function runOutcomeAnimation(outcome) {
     case 'win-with-sixes':
     case 'normal-move':
     case 'win-normal': {
-      // Walk to landing, then animate snake/ladder if any
-      setMessage('');
+      // Walk to landing (the roll text stays up), then animate snake/ladder if any
       await animateSteps(idx, outcome.steps, positions);
       if (outcome.snakeLadderTo != null) {
         const isLadder = LADDERS[outcome.landing] === outcome.snakeLadderTo;
@@ -1164,7 +1172,7 @@ async function handleRemoteUpdate(gameData, lastMove) {
     setMessage(`${rollerName} is rolling…`);
     playSound('roll');
     await throwDice(lastMove.roll);
-    setMessage(`${rollerName} rolled ${lastMove.roll}`);   // only once the dice has settled
+    await announceRoll(`${rollerName} rolled ${lastMove.roll}`);   // only once the dice has settled
     await runOutcomeAnimation({
       kind: lastMove.kind,
       by: rollerIndex,
