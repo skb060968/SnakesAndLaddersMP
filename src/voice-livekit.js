@@ -11,7 +11,8 @@
  * - All players in the room may join one shared voice call (LiveKit SFU).
  *
  * Token is minted by /api/livekit-token, which verifies the caller's Firebase
- * ID token. The LiveKit room is namespaced per game (`<game>-<code>`).
+ * ID token and that the caller's uid owns the requested `player_N` seat in the
+ * room. The LiveKit room is namespaced per game (`<game>-<code>`).
  */
 
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL;
@@ -46,7 +47,12 @@ export function createLiveKitVoice({ game, roomCode, identity, displayName, getI
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ game, room: roomCode, identity, name: displayName }),
       });
-      if (!response.ok) throw new Error('token-request-failed');
+      if (!response.ok) {
+        let reason = '';
+        try { reason = (await response.json())?.error || ''; } catch (_) {}
+        // 403 not-in-room: the server could not match this device to the seat.
+        throw new Error(response.status === 403 && reason === 'not-in-room' ? 'not-in-room' : 'token-request-failed');
+      }
       const { token } = await response.json();
       if (!token) throw new Error('no-token');
 
@@ -88,7 +94,11 @@ export function createLiveKitVoice({ game, roomCode, identity, displayName, getI
       cleanupAudio();
       room = null;
       joined = false;
-      emit('error', { message: 'Voice unavailable — try again.' });
+      emit('error', {
+        message: error?.message === 'not-in-room'
+          ? 'Voice is only for players in this room — rejoin the room and try again.'
+          : 'Voice unavailable — try again.',
+      });
     }
   }
 
