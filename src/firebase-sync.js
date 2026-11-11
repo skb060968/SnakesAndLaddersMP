@@ -17,8 +17,20 @@ const TRANSIENT_CODES = new Set([
 const roomPath = (code) => `${ROOM_PATH}/${normalizeRoomCode(code)}`;
 const playerKeyFor = (index) => `player_${index}`;
 const playerIndexFrom = (key) => Number.parseInt(key.replace('player_', ''), 10);
-const now = () => Date.now();
+/* Server clock: the rules compare lastActivity / operation.timestamp with the
+   server's `now`, so every timestamp we write is the phone clock corrected by
+   Firebase's measured offset. Listening starts at module load, before any write. */
+let serverOffsetMs = 0;
+onValue(ref(db, '.info/serverTimeOffset'), (snap) => {
+  const v = snap.val();
+  if (Number.isFinite(v)) serverOffsetMs = v;
+});
+export const serverNow = () => Math.round(Date.now() + serverOffsetMs);
+const now = serverNow;
 let stopPresence = null;
+// Bumped by every presence start/stop so an older, still-awaiting setup can
+// tell it was superseded and must not register its .info/connected handler.
+let presenceGen = 0;
 
 function normalizeRoomCode(value) {
   const code = String(value || '').trim().toUpperCase();
@@ -164,13 +176,16 @@ export function listenRoom(roomCode, callbacks) {
 }
 
 export async function setupDisconnectHandler(roomCode, playerIndex) {
-  await stopPresenceTracking();
+  const gen = ++presenceGen;
+  await disposePresence();
   const user = await requireUser();
   const code = normalizeRoomCode(roomCode);
   const key = playerKeyFor(playerIndex);
   if (!PLAYER_KEY_RE.test(key)) throw new Error('Invalid player slot');
   const playerRef = ref(db, `${roomPath(code)}/players/${key}`);
   const playerSnapshot = await get(playerRef);
+  // A newer setup (or a stop) started while we were waiting: leave it to that one.
+  if (gen !== presenceGen) return null;
   if (!playerSnapshot.exists() || playerSnapshot.val()?.uid !== user.uid) {
     throw new Error('Player session is no longer valid');
   }
@@ -215,6 +230,11 @@ export function watchReconnect(onRestore) {
 }
 
 export async function stopPresenceTracking() {
+  presenceGen += 1;
+  await disposePresence();
+}
+
+async function disposePresence() {
   const cleanup = stopPresence;
   stopPresence = null;
   if (cleanup) await cleanup();
@@ -288,8 +308,9 @@ export async function commitMove(roomCode, expectedRevision, serializedState, la
  * HOST ONLY. Hands the turn to the next eligible player when the current one has
  * gone offline and stopped rolling.
  *
- * Every board field is left exactly as it was — only `currentPlayerKey` moves —
- * which is what the `skip` rule branch permits. `lastMove` is dropped: the rules
+ * Every board field is left exactly as it was — only `currentPlayerKey` moves and
+ * the skipped player's stored sixes reset to 0 — which is what the `skip` rule
+ * branch permits. `lastMove` is dropped: the rules
  * require lastMove.revision to match game.revision, and a skip bumps the revision
  * without producing a roll, so there is no coherent move to carry forward. The
  * clients treat a missing/stale lastMove as "nothing to animate".
@@ -330,6 +351,10 @@ export async function skipTurnAsHost(roomCode, skipKeys = []) {
       revision,
       operation: operation('skip', user, cur, current.roundId, revision),
     };
+    // The skipped player's turn is over, so any sixes they had stored are dropped
+    // (the skip rule allows exactly this: their accumulated/consecutive back to 0).
+    if (current.accumulated && cur in current.accumulated) out.accumulated = { ...current.accumulated, [cur]: 0 };
+    if (current.consecutive && cur in current.consecutive) out.consecutive = { ...current.consecutive, [cur]: 0 };
     delete out.lastMove;
     return out;
   }, { applyLocally: false });

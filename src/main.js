@@ -74,6 +74,7 @@ import { mountVoiceChat } from './voice-chat-widget.js';
 /* ======= CONSTANTS ======= */
 
 const SESSION_KEY = 'snl_mp_session';
+const ROOM_CODE_RE = /^[A-HJ-NP-Z]{4}$/;
 
 /* ======= STATE ======= */
 
@@ -197,15 +198,21 @@ async function reconcileAfterReconnect() {
   let room = null;
   try { room = (await get(ref(db, `snl-rooms/${roomCode}`))).val(); }
   catch (err) { console.warn('reconnect reconcile fetch failed:', err); return; }
-  if (!room || room.meta?.status === 'ended') {
+  if (!room) {
     showToast('Host has left. Room closed.', 3000);
     cleanupAndGoHome();
     return;
   }
   if (room.players) roomPlayers = room.players;
-  if (room.game?.status === 'finished' && state && !_resultsShown) {
-    state = { ...state, status: 'finished', winnerIndex: state.players.findIndex((p) => p.slotKey === room.game.winnerKey) };
-    handleWin();
+  // End Game keeps the room (meta.status 'ended') for Play Again: show results, stay.
+  if (room.meta?.status === 'ended' || room.game?.status === 'finished') {
+    if (state && !_resultsShown) {
+      const winnerIndex = room.game?.status === 'finished'
+        ? state.players.findIndex((p) => p.slotKey === room.game.winnerKey)
+        : -1;
+      state = { ...state, status: 'finished', winnerIndex: winnerIndex >= 0 ? winnerIndex : null };
+      handleWin();
+    }
     return;
   }
   evaluateOfflineWatch();
@@ -337,7 +344,32 @@ async function closeRoomAfterHostLoss() {
   cleanupAndGoHome();
 }
 
+/* ======= REMOVED FROM THE ROOM =======
+ * Our seat vanished (the host removed us) or now belongs to someone else. Checked
+ * again after a short delay so a transient snapshot never ejects anyone, and
+ * skipped while we are leaving on purpose (our own leavePlayer removes the seat). */
+let leavingRoom = false;
+let seatLostTimer = null;
+
+function ownSeatLost(players) {
+  if (!roomCode || playerIndex == null || leavingRoom) return false;
+  const mine = players?.[`player_${playerIndex}`];
+  return !mine || mine.uid !== auth.currentUser?.uid;
+}
+
+function handleSeatLost() {
+  if (seatLostTimer) return;
+  seatLostTimer = setTimeout(() => {
+    seatLostTimer = null;
+    if (!ownSeatLost(roomPlayers)) return;
+    showToast('You were removed from the room', 3000);
+    cleanupAndGoHome();   // stops presence (cancels onDisconnect) and clears the session
+  }, 400);
+}
+
 function cleanupAndGoHome() {
+  if (seatLostTimer) { clearTimeout(seatLostTimer); seatLostTimer = null; }
+  leavingRoom = false;
   clearHostLossWatch();
   clearOfflineTurnWatch();
   clearAbandonWatch();
@@ -480,7 +512,8 @@ let _lastPreviewedCode = null;
  * Auto-restarts when the typed code changes.
  */
 function startJoinPreviewListener(code) {
-  if (!code || code.length !== 4) return;
+  // Validate before ref(): a typed '.', '#', '$', '[' or ']' would make ref() throw.
+  if (!code || !ROOM_CODE_RE.test(code)) return;
   if (_lastPreviewedCode === code && _joinPreviewUnsub) return;
   stopJoinPreviewListener();
   _lastPreviewedCode = code;
@@ -519,7 +552,7 @@ function wireJoinRoom() {
   if (btnSubmit) btnSubmit.addEventListener('click', async () => {
     const code = document.getElementById('room-code-input')?.value.trim().toUpperCase();
     const name = document.getElementById('join-name-input')?.value.trim();
-    if (!code || code.length !== 4) { showToast('Enter a valid 4-character room code'); return; }
+    if (!code || !ROOM_CODE_RE.test(code)) { showToast('Enter a valid 4-character room code'); return; }
     if (!name) { showToast('Please enter your name'); return; }
     const emoji = getSelectedEmoji('.join-emoji-picker');
     const color = getSelectedColor('.join-color-picker');
@@ -528,9 +561,16 @@ function wireJoinRoom() {
       if (!result.success) { showToast(result.reason || 'Failed to join'); return; }
       roomCode = code;
       playerIndex = result.playerIndex;
-      isHost = false;
+      // joinRoom hands the host their own seat (slot 0) back when they rejoin by code.
+      isHost = playerIndex === 0;
       saveSession();
       stopJoinPreviewListener();
+      if (isHost) {
+        // Restore whatever phase the room is in (lobby, running game or results),
+        // exactly as a reload would; the lobby listener only loads games for guests.
+        if (!await checkSession()) cleanupAndGoHome();
+        return;
+      }
       setupLobby();
     } catch (err) {
       console.error(err);
@@ -601,6 +641,7 @@ function setupLobby() {
   unsubscribeRoom = listenRoom(roomCode, {
     onPlayersChange: (players) => {
       roomPlayers = players;
+      if (ownSeatLost(players)) { handleSeatLost(); return; }
       refreshLobby(players);
       // Presence lives on the players node, not the game node — re-render the
       // in-game list so the not-connected marker appears promptly.
@@ -765,8 +806,8 @@ function wireLobby() {
       const snap = await firebaseRetry(() => get(ref(db, `snl-rooms/${roomCode}/players`)));
       if (!snap.exists()) { showToast('No players found'); return; }
       const pd = snap.val();
-      // The rules tie game/positions to the room's player nodes (player_0 &
-      // player_1 mandatory, player_2/3 must match the players node), so the
+      // The rules tie game/positions to the room's player nodes (player_0
+      // mandatory, player_1/2/3 must match the players node), so the
       // game roster must be ALL named players — an offline player stays in the
       // roster and takes part when they reconnect. Gate on connected count so
       // at least two real players are present to actually play.
@@ -797,6 +838,7 @@ function wireLobby() {
   if (btnLeave) btnLeave.addEventListener('click', async () => {
     // Disable button to prevent double-clicks
     btnLeave.disabled = true;
+    leavingRoom = true;   // our own removal must not read as "you were removed"
     
     try {
       if (isHost && roomCode) {
@@ -886,7 +928,7 @@ function startGame() {
       game: 'snl',
       getRoomCode: () => roomCode,
       getIdentity: () => (playerIndex != null ? `player_${playerIndex}` : null),
-      getDisplayName: () => playerNames[playerIndex] || `Player ${playerIndex + 1}`,
+      getDisplayName: () => roomPlayers[`player_${playerIndex}`]?.name || `Player ${playerIndex + 1}`,
       getIdToken: async () => (await authReady).getIdToken(),
       onSpeakers: (ids) => setActiveSpeakers(ids),
       notify: (m) => showToast(m),
@@ -1335,7 +1377,10 @@ function wireResults() {
         btnAgain.textContent = 'Play Again';
         state = null;
         if (roomCode) { try { await resetRoom(roomCode); } catch (e) { showToast('Failed to reset.'); } }
-        setupLobby();
+        // resetRoom's status 'lobby' snapshot usually opens the lobby already (room
+        // listener); a second setupLobby would start a second presence setup.
+        const lobby = document.getElementById('lobby');
+        if (roomCode && (!lobby || lobby.hasAttribute('hidden'))) setupLobby();
       }
     } else {
       if (roomCode && playerIndex != null) {
@@ -1354,6 +1399,7 @@ function wireResults() {
     }
     if (window._snlReadyCleanup) window._snlReadyCleanup();
     if (roomCode) {
+      leavingRoom = true;   // our own removal must not read as "you were removed"
       if (playerIndex != null) {
         try { await setPlayerReady(roomCode, playerIndex, 'left'); } catch (_) {}
       }
@@ -1412,7 +1458,7 @@ function renderReadyIndicators(players, readyState) {
 
 async function checkSession() {
   const session = loadSession();
-  if (!session?.roomCode || !Number.isInteger(session.playerIndex)) return false;
+  if (!session?.roomCode || !ROOM_CODE_RE.test(session.roomCode) || !Number.isInteger(session.playerIndex)) return false;
   try {
     const snap = await firebaseRetry(() => get(ref(db, `snl-rooms/${session.roomCode}`)));
     if (!snap.exists()) { clearSession(); return false; }
@@ -1714,7 +1760,8 @@ async function init() {
     return;
   }
 
-  const linkedCode = new URL(location.href).searchParams.get('room')?.toUpperCase() || null;
+  const rawLinkedCode = new URL(location.href).searchParams.get('room')?.trim().toUpperCase() || null;
+  const linkedCode = rawLinkedCode && ROOM_CODE_RE.test(rawLinkedCode) ? rawLinkedCode : null;
   const saved = loadSession();
   if (linkedCode && saved?.roomCode === linkedCode) {
     history.replaceState({}, '', location.pathname);
