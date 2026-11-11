@@ -301,10 +301,24 @@ export function showDiagnosticsOverlay() {
 
 /**
  * Discreet 5-tap gesture (within 2s) that opens the viewer. Bound at document
- * level so it works on EVERY screen — including mid-game and results — because
+ * level, counted on the HOME screen only (see onHomeScreen). Recording works everywhere;
  * the log matters most right after a failure. Taps on interactive controls are
  * ignored so it can never interfere with play; an accidental open is harmless.
  */
+/**
+ * The viewer opens from the HOME screen only. In play, taps on the field (tap to
+ * run, pass, aim) used to add up to 5 and open it mid-game. Errors are still
+ * recorded on every screen and kept across screens and reloads, so after a failure
+ * leave the game and tap 5× on the home screen.
+ */
+const HOME_SCREEN_IDS = ['home', 'landing-page', 'menuScreen'];
+function onHomeScreen() {
+  return HOME_SCREEN_IDS.some((id) => {
+    const screen = document.getElementById(id);
+    return Boolean(screen) && !screen.hidden && screen.getClientRects().length > 0;
+  });
+}
+
 function installDiagnosticsGesture() {
   const interactive = 'button, a, input, textarea, select, label, [role="button"],'
     + ' svg, canvas, [data-action], [data-card-index], [data-hand-index],'
@@ -313,6 +327,7 @@ function installDiagnosticsGesture() {
   let timer = null;
   document.addEventListener('click', (event) => {
     if (document.getElementById('diagnostics-overlay')) return;
+    if (!onHomeScreen()) { taps = 0; return; }
     if (event.target instanceof Element && event.target.closest(interactive)) return;
     taps += 1;
     clearTimeout(timer);
